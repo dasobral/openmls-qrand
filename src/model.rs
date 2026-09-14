@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::QrngError;
 
@@ -56,4 +56,20 @@ impl Capabilities {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct EntropyRequest<'a> {
+    pub(crate) block_size: usize,
+    pub(crate) block_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) entropy_type: Option<&'a str>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct EntropyResponse {
+    pub(crate) entropy: Vec<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub(crate) extensions: Vec<serde_json::Value>,
 }

@@ -10,6 +10,10 @@ use openmls_qrng_provider::{
 };
 use serde_json::json;
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
+
+use common::test_server::default_entropy_block;
 use common::TestServer;
 
 fn plain_http_config(base_url: &str) -> QrngConfig {
@@ -377,5 +381,361 @@ fn api_auth_x_api_key_debug_does_not_contain_key() {
     assert!(
         !debug.contains(KEY),
         "ApiAuth::XApiKey Debug must not contain the key, got {debug:?}"
+    );
+}
+
+const LEAK_BYTES: &[u8] = b"QRNG-LEAK-TEST-BLOCK-AA";
+const LEAK_TEXT: &str = "QRNG-LEAK-TEST-BLOCK-AA";
+const INVALID_B64: &str = "!!!NOT-VALID-BASE64-QRNG-LEAK!!!";
+
+fn capabilities_with_block_limits(
+    min_block_size: usize,
+    max_block_size: usize,
+) -> serde_json::Value {
+    json!({
+        "entropy": {
+            "min_block_size": min_block_size,
+            "max_block_size": max_block_size,
+            "min_block_count": 1,
+            "max_block_count": 8,
+            "entropy_types": ["raw"]
+        }
+    })
+}
+
+fn connect_plain(server: &TestServer, caps: serde_json::Value) -> QrngClient {
+    server.set_capabilities_json(caps);
+    QrngClient::connect(plain_http_config(&server.origin())).expect("connect")
+}
+
+fn entropy_posts(
+    requests: &[common::test_server::RecordedRequest],
+) -> Vec<&common::test_server::RecordedRequest> {
+    requests
+        .iter()
+        .filter(|request| {
+            request.method.eq_ignore_ascii_case("POST")
+                && (request.path == "/v1/entropy" || request.path.ends_with("/v1/entropy"))
+        })
+        .collect()
+}
+
+fn entropy_body(request: &common::test_server::RecordedRequest) -> serde_json::Value {
+    serde_json::from_slice(&request.body).expect("entropy POST body must be JSON")
+}
+
+fn assert_entropy_post_contract(request: &common::test_server::RecordedRequest) {
+    assert_eq!(request.path, "/v1/entropy");
+    let body = entropy_body(request);
+    assert_eq!(body["block_count"], json!(1));
+    assert!(
+        body.get("block_size").and_then(|v| v.as_u64()).is_some(),
+        "block_size must be present, got {body}"
+    );
+}
+
+fn assert_no_entropy_leak(err: &QrngError, distinctive: &[&str]) {
+    let display = format!("{err}");
+    let debug = format!("{err:?}");
+    for needle in distinctive {
+        assert!(
+            !display.contains(needle),
+            "error Display must not contain {needle:?}, got {display:?}"
+        );
+        assert!(
+            !debug.contains(needle),
+            "error Debug must not contain {needle:?}, got {debug:?}"
+        );
+    }
+}
+
+fn leak_b64() -> String {
+    BASE64.encode(LEAK_BYTES)
+}
+
+#[test]
+fn fetch_entropy_zero_performs_no_request() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    let after_connect = server.recorded_requests().len();
+    assert_eq!(
+        after_connect, 1,
+        "connect must have sent one capabilities GET"
+    );
+
+    let bytes = client
+        .fetch_entropy(0)
+        .expect("fetch_entropy(0) must succeed");
+    assert!(bytes.is_empty(), "fetch_entropy(0) must return empty vec");
+    assert_eq!(
+        server.recorded_requests().len(),
+        after_connect,
+        "fetch_entropy(0) must not send any additional request"
+    );
+}
+
+#[test]
+fn fetch_entropy_exact_single_block() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+
+    let bytes = client
+        .fetch_entropy(32)
+        .expect("exact 32-byte block must succeed");
+    assert_eq!(bytes, default_entropy_block(32));
+
+    let requests = server.recorded_requests();
+    let posts = entropy_posts(&requests);
+    assert_eq!(posts.len(), 1, "exact single block must send one POST");
+    assert_entropy_post_contract(posts[0]);
+    assert_eq!(entropy_body(posts[0])["block_size"], json!(32));
+}
+
+#[test]
+fn fetch_entropy_larger_than_max_block_size_sends_multiple_posts() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, capabilities_with_block_limits(16, 32));
+
+    let bytes = client
+        .fetch_entropy(80)
+        .expect("request larger than max_block_size must succeed");
+    assert_eq!(bytes.len(), 80);
+
+    let requests = server.recorded_requests();
+    let posts = entropy_posts(&requests);
+    assert_eq!(posts.len(), 3, "80 bytes with max 32 must be three POSTs");
+    let sizes: Vec<u64> = posts
+        .iter()
+        .map(|request| {
+            assert_entropy_post_contract(request);
+            entropy_body(request)["block_size"]
+                .as_u64()
+                .expect("block_size")
+        })
+        .collect();
+    assert_eq!(sizes, vec![32, 32, 16]);
+
+    let mut expected = Vec::new();
+    for size in sizes {
+        expected.extend_from_slice(&default_entropy_block(size as usize));
+    }
+    assert_eq!(bytes, expected);
+}
+
+#[test]
+fn fetch_entropy_remainder_smaller_than_min_fetches_min_and_discards_tail() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, capabilities_with_block_limits(16, 1024));
+
+    let bytes = client
+        .fetch_entropy(8)
+        .expect("remainder smaller than min_block_size must succeed");
+    assert_eq!(bytes.len(), 8);
+    assert_eq!(
+        bytes,
+        default_entropy_block(16)[..8].to_vec(),
+        "must keep the prefix and discard the unused tail"
+    );
+    assert_ne!(bytes, default_entropy_block(16)[8..].to_vec());
+
+    let requests = server.recorded_requests();
+    let posts = entropy_posts(&requests);
+    assert_eq!(posts.len(), 1);
+    assert_entropy_post_contract(posts[0]);
+    assert_eq!(entropy_body(posts[0])["block_size"], json!(16));
+}
+
+#[test]
+fn fetch_entropy_http_422_maps_to_invalid_request() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.enqueue_entropy_json(422, json!({ "entropy": [leak_b64()], "error": LEAK_TEXT }));
+
+    let err = client.fetch_entropy(32).expect_err("HTTP 422 must fail");
+    assert!(
+        matches!(err, QrngError::InvalidRequest),
+        "expected InvalidRequest, got {err:?}"
+    );
+    assert_no_entropy_leak(&err, &[LEAK_TEXT, &leak_b64()]);
+}
+
+#[test]
+fn fetch_entropy_http_503_maps_to_entropy_unavailable() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.enqueue_entropy_json(503, json!({ "entropy": [leak_b64()], "error": LEAK_TEXT }));
+
+    let err = client.fetch_entropy(32).expect_err("HTTP 503 must fail");
+    assert!(
+        matches!(err, QrngError::EntropyUnavailable),
+        "expected EntropyUnavailable, got {err:?}"
+    );
+    assert_no_entropy_leak(&err, &[LEAK_TEXT, &leak_b64()]);
+}
+
+#[test]
+fn fetch_entropy_http_500_maps_to_http_status() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.enqueue_entropy_json(500, json!({ "entropy": [leak_b64()], "error": LEAK_TEXT }));
+
+    let err = client.fetch_entropy(32).expect_err("HTTP 500 must fail");
+    assert!(
+        matches!(err, QrngError::HttpStatus(_)),
+        "expected HttpStatus, got {err:?}"
+    );
+    assert_no_entropy_leak(&err, &[LEAK_TEXT, &leak_b64()]);
+}
+
+#[test]
+fn fetch_entropy_malformed_json_rejected_as_protocol() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.enqueue_entropy_raw(
+        200,
+        format!("not-json {LEAK_TEXT} {INVALID_B64}").into_bytes(),
+    );
+
+    let err = client
+        .fetch_entropy(32)
+        .expect_err("malformed JSON must be rejected");
+    assert!(
+        matches!(err, QrngError::Protocol(_)),
+        "expected Protocol, got {err:?}"
+    );
+    assert_no_entropy_leak(&err, &[LEAK_TEXT, INVALID_B64]);
+}
+
+#[test]
+fn fetch_entropy_empty_entropy_array_rejected() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.enqueue_entropy_json(200, json!({ "entropy": [], "unused": LEAK_TEXT }));
+
+    let err = client
+        .fetch_entropy(32)
+        .expect_err("empty entropy array must be rejected");
+    assert!(
+        matches!(err, QrngError::Protocol(_)),
+        "expected Protocol, got {err:?}"
+    );
+    assert_no_entropy_leak(&err, &[LEAK_TEXT]);
+}
+
+#[test]
+fn fetch_entropy_multiple_entropy_blocks_rejected() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    let encoded = leak_b64();
+    server.enqueue_entropy_json(200, json!({ "entropy": [encoded, encoded] }));
+
+    let err = client
+        .fetch_entropy(32)
+        .expect_err("multiple entropy blocks must be rejected");
+    assert!(
+        matches!(err, QrngError::Protocol(_)),
+        "expected Protocol, got {err:?}"
+    );
+    assert_no_entropy_leak(&err, &[LEAK_TEXT, &leak_b64()]);
+}
+
+#[test]
+fn fetch_entropy_invalid_base64_rejected() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.enqueue_entropy_json(200, json!({ "entropy": [INVALID_B64] }));
+
+    let err = client
+        .fetch_entropy(32)
+        .expect_err("invalid Base64 must be rejected");
+    assert!(
+        matches!(err, QrngError::Base64(_) | QrngError::Protocol(_)),
+        "expected Base64 or Protocol, got {err:?}"
+    );
+    assert_no_entropy_leak(&err, &[INVALID_B64, LEAK_TEXT]);
+}
+
+#[test]
+fn fetch_entropy_decoded_block_shorter_than_requested_rejected() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.enqueue_entropy_json(200, json!({ "entropy": [leak_b64()] }));
+
+    let err = client
+        .fetch_entropy(32)
+        .expect_err("decoded block shorter than requested must be rejected");
+    assert!(
+        matches!(err, QrngError::Protocol(_)),
+        "expected Protocol, got {err:?}"
+    );
+    assert_no_entropy_leak(&err, &[LEAK_TEXT, &leak_b64()]);
+}
+
+#[test]
+fn fetch_entropy_decoded_block_longer_than_requested_rejected() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    let long = BASE64.encode([LEAK_BYTES, LEAK_BYTES].concat());
+    server.enqueue_entropy_json(200, json!({ "entropy": [long] }));
+
+    let err = client
+        .fetch_entropy(32)
+        .expect_err("decoded block longer than requested must be rejected");
+    assert!(
+        matches!(err, QrngError::Protocol(_)),
+        "expected Protocol, got {err:?}"
+    );
+    assert_no_entropy_leak(&err, &[LEAK_TEXT, &leak_b64()]);
+}
+
+#[test]
+fn fetch_entropy_bytes_never_appear_in_error_text() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    let encoded = leak_b64();
+    server.enqueue_entropy_json(
+        200,
+        json!({
+            "entropy": [encoded],
+            "note": LEAK_TEXT
+        }),
+    );
+
+    let err = client
+        .fetch_entropy(32)
+        .expect_err("wrong-length distinctive block must fail");
+    assert_no_entropy_leak(&err, &[LEAK_TEXT, &leak_b64()]);
+}
+
+#[test]
+fn fetch_entropy_includes_entropy_type_when_configured() {
+    let server = TestServer::start();
+    server.set_capabilities_json(valid_capabilities_json());
+    let mut cfg = plain_http_config(&server.origin());
+    cfg.entropy_type = Some("raw".to_string());
+    let client = QrngClient::connect(cfg).expect("connect");
+
+    client.fetch_entropy(32).expect("fetch");
+    let requests = server.recorded_requests();
+    let posts = entropy_posts(&requests);
+    assert_eq!(posts.len(), 1);
+    assert_entropy_post_contract(posts[0]);
+    assert_eq!(entropy_body(posts[0])["entropy_type"], json!("raw"));
+}
+
+#[test]
+fn fetch_entropy_omits_entropy_type_when_not_configured() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+
+    client.fetch_entropy(32).expect("fetch");
+    let requests = server.recorded_requests();
+    let posts = entropy_posts(&requests);
+    assert_eq!(posts.len(), 1);
+    assert_entropy_post_contract(posts[0]);
+    assert!(
+        entropy_body(posts[0]).get("entropy_type").is_none(),
+        "entropy_type must be absent when not configured, got {}",
+        entropy_body(posts[0])
     );
 }
