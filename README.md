@@ -44,7 +44,7 @@ Transport is selected explicitly. The library does not infer the security mode f
 | TLS | `TransportMode::Tls { ca_cert_pem }` | `https://` | Server authentication; HTTPS always verifies the server certificate |
 | mTLS | `TransportMode::MutualTls { ca_cert_pem, client_cert_pem, client_key_pem }` | `https://` | Server authentication plus a client certificate |
 
-There is no insecure-TLS option. `Tls { ca_cert_pem: None }` uses the webpki/system roots. `Tls { ca_cert_pem: Some(path) }` adds that CA PEM to the client trust store. `MutualTls` always loads a CA, client certificate, and client key.
+There is no insecure-TLS option. `Tls { ca_cert_pem: None }` uses the rustls webpki-roots bundle (Mozilla CA set). The OS trust store is not consulted. `Tls { ca_cert_pem: Some(path) }` adds that CA PEM to the client trust store. `MutualTls` always loads a CA, client certificate, and client key.
 
 ## Supported QRNG Open API
 
@@ -98,7 +98,7 @@ let config = QrngConfig {
 };
 ```
 
-System or webpki roots, with no extra CA file:
+webpki-roots only, with no extra CA file:
 
 ```rust
 transport: TransportMode::Tls { ca_cert_pem: None },
