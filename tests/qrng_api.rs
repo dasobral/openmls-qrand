@@ -4,7 +4,7 @@ mod common;
 
 use std::time::Duration;
 
-use openmls_qrng_provider::{
+use openmls_qrand::{
     ApiAuth, Capabilities, HealthReport, QrngClient, QrngConfig, QrngError, TransportMode,
 };
 use serde_json::json;

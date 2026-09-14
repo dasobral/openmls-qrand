@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use openmls_qrng_provider::{
+use openmls_qrand::{
     ApiAuth, QrngClient, QrngConfig, QrngError, QrngOpenMlsProvider, QrngRand, TransportMode,
 };
 use openmls_rust_crypto::{MemoryStorage, RustCrypto};

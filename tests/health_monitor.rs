@@ -10,9 +10,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use openmls_qrng_provider::{
-    ApiAuth, HealthMonitor, QrngClient, QrngConfig, QrngError, TransportMode,
-};
+use openmls_qrand::{ApiAuth, HealthMonitor, QrngClient, QrngConfig, QrngError, TransportMode};
 use serde_json::json;
 
 use common::test_server::RecordedRequest;

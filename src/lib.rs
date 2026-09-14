@@ -1,4 +1,4 @@
-//! Generic OpenMLS provider, independent of agent-trust, that fetches entropy from a QRNG Open API endpoint.
+//! `openmls-qrand`: a generic OpenMLS provider, independent of agent-trust, that fetches entropy from a QRNG Open API endpoint.
 //!
 //! The library replaces the OpenMLS `OpenMlsRand` randomness source with QRNG Open API entropy.
 //! It does not replace randomness internal to every cryptographic backend, including randomness

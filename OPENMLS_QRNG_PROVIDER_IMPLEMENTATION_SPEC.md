@@ -428,19 +428,19 @@ https://entropy.example.net/qrng/v1/entropy
 Repository name:
 
 ```text
-openmls-qrng-provider
+openmls-qrand
 ```
 
 Crate name:
 
 ```text
-openmls_qrng_provider
+openmls_qrand
 ```
 
 Required tree:
 
 ```text
-openmls-qrng-provider/
+openmls-qrand/
 ├── Cargo.toml
 ├── README.md
 ├── LICENSE
@@ -1497,7 +1497,7 @@ Do not implement directly on `main` or `master`.
 Maintain:
 
 ```text
-.superpowers/sdd/openmls-qrng-provider/progress.md
+.superpowers/sdd/openmls-qrand/progress.md
 ```
 
 or an equivalent git-ignored ledger.
@@ -1860,7 +1860,7 @@ Provider composition:
 use std::sync::Arc;
 
 use openmls_rust_crypto::{MemoryStorage, RustCrypto};
-use openmls_qrng_provider::{
+use openmls_qrand::{
     HealthMonitor,
     QrngClient,
     QrngOpenMlsProvider,

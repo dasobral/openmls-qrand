@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use openmls_qrng_provider::{ApiAuth, QrngConfig, QrngError, TransportMode};
+use openmls_qrand::{ApiAuth, QrngConfig, QrngError, TransportMode};
 
 use common::test_server::TestCa;
 
@@ -14,7 +14,7 @@ static FIXTURE_SEQ: AtomicU64 = AtomicU64::new(0);
 fn fixture_dir() -> PathBuf {
     // Unique per call so parallel tests do not overwrite shared PEM fixtures.
     let dir = std::env::temp_dir().join(format!(
-        "openmls-qrng-provider-config-tests-{}-{}",
+        "openmls-qrand-config-tests-{}-{}",
         std::process::id(),
         FIXTURE_SEQ.fetch_add(1, Ordering::Relaxed)
     ));

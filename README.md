@@ -1,4 +1,4 @@
-# openmls-qrng-provider
+# openmls-qrand
 
 A small, reusable Rust library that supplies QRNG-backed randomness to OpenMLS.
 
@@ -16,13 +16,9 @@ It does not claim that all OpenMLS, RustCrypto, HPKE, TLS, or host-application r
 
 ## Installation
 
-This crate is unpublished. Depend on it via path or git, not crates.io.
-
 ```toml
 [dependencies]
-openmls_qrng_provider = { path = "../openmls-qrng-provider" }
-# or: openmls_qrng_provider = { git = "<repository-url>" }
-
+openmls_qrand = { git = "https://github.com/dasobral/openmls-qrand.git" }
 openmls_traits = "0.6.0"
 ```
 
@@ -67,7 +63,7 @@ There is no fallback to OS RNG, `/dev/urandom`, `getrandom`, `thread_rng`, RustC
 ```rust
 use std::time::Duration;
 
-use openmls_qrng_provider::{ApiAuth, QrngConfig, TransportMode};
+use openmls_qrand::{ApiAuth, QrngConfig, TransportMode};
 
 let config = QrngConfig {
     base_url: "http://127.0.0.1:8002".parse()?,
@@ -84,7 +80,7 @@ let config = QrngConfig {
 ```rust
 use std::time::Duration;
 
-use openmls_qrng_provider::{ApiAuth, QrngConfig, TransportMode};
+use openmls_qrand::{ApiAuth, QrngConfig, TransportMode};
 
 let config = QrngConfig {
     base_url: "https://entropy.example.net".parse()?,
@@ -109,7 +105,7 @@ transport: TransportMode::Tls { ca_cert_pem: None },
 ```rust
 use std::time::Duration;
 
-use openmls_qrng_provider::{ApiAuth, QrngConfig, TransportMode};
+use openmls_qrand::{ApiAuth, QrngConfig, TransportMode};
 
 let config = QrngConfig {
     base_url: "https://entropy.example.net".parse()?,
@@ -147,7 +143,7 @@ Compose `QrngOpenMlsProvider` with `RustCrypto` and `MemoryStorage`. Pass `&prov
 use std::sync::Arc;
 use std::time::Duration;
 
-use openmls_qrng_provider::{
+use openmls_qrand::{
     HealthMonitor, QrngClient, QrngOpenMlsProvider, QrngRand,
 };
 use openmls_rust_crypto::{MemoryStorage, RustCrypto};
@@ -178,7 +174,7 @@ There is no `HealthMonitor::metrics_snapshot`. Health state is `health.snapshot(
 use std::sync::Arc;
 use std::time::Duration;
 
-use openmls_qrng_provider::{HealthMonitor, QrngClient};
+use openmls_qrand::{HealthMonitor, QrngClient};
 
 let client = Arc::new(QrngClient::connect(config)?);
 let health = HealthMonitor::start(client.clone(), Duration::from_secs(5))?;

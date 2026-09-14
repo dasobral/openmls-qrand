@@ -1,10 +1,11 @@
 [package]
-name = "openmls_qrng_provider"
+name = "openmls_qrand"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.91"
 license = "MIT"
-description = "generic OpenMLS QRNG Open API randomness provider"
+description = "OpenMLS randomness provider backed by a QRNG Open API"
+repository = "https://github.com/dasobral/openmls-qrand"
 
 [dependencies]
 openmls_traits = "0.6.0"

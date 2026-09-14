@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use openmls_qrng_provider::{ApiAuth, QrngClient, QrngConfig, QrngError, TransportMode};
+use openmls_qrand::{ApiAuth, QrngClient, QrngConfig, QrngError, TransportMode};
 use serde_json::json;
 
 use common::test_server::{IssuedIdentity, ServerSan, TestCa};

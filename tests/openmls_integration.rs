@@ -13,7 +13,7 @@ use openmls::credentials::{BasicCredential, CredentialWithKey};
 use openmls::group::{MlsGroup, MlsGroupCreateConfig};
 use openmls::prelude::Ciphersuite;
 use openmls_basic_credential::SignatureKeyPair;
-use openmls_qrng_provider::{
+use openmls_qrand::{
     ApiAuth, QrngClient, QrngConfig, QrngOpenMlsProvider, QrngRand, TransportMode,
 };
 use openmls_rust_crypto::{MemoryStorage, RustCrypto};
