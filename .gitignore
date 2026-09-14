@@ -1,0 +1,20 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Worktrees and local ledgers
+.worktrees/
+.superpowers/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Test artifacts
+/tmp/
+*.pem
+!tests/**/*.rs
