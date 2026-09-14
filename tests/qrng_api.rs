@@ -290,3 +290,92 @@ fn connect_rejects_malformed_json_as_protocol() {
         "expected Protocol, got {err:?}"
     );
 }
+
+fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+fn has_header(headers: &[(String, String)], name: &str) -> bool {
+    header_value(headers, name).is_some()
+}
+
+#[test]
+fn connect_with_api_auth_none_sends_no_authorization_or_x_api_key_header() {
+    let server = TestServer::start();
+    server.set_capabilities_json(valid_capabilities_json());
+
+    QrngClient::connect(plain_http_config(&server.origin())).expect("connect");
+
+    let requests = server.recorded_requests();
+    assert_eq!(requests.len(), 1, "connect must send exactly one request");
+    let headers = &requests[0].headers;
+    assert!(
+        !has_header(headers, "Authorization"),
+        "ApiAuth::None must not send Authorization, got {headers:?}"
+    );
+    assert!(
+        !has_header(headers, "X-API-KEY"),
+        "ApiAuth::None must not send X-API-KEY, got {headers:?}"
+    );
+}
+
+#[test]
+fn connect_with_api_auth_bearer_sets_authorization_header() {
+    const TOKEN: &str = "super-secret-token-42";
+    let server = TestServer::start();
+    server.set_capabilities_json(valid_capabilities_json());
+
+    let mut cfg = plain_http_config(&server.origin());
+    cfg.auth = ApiAuth::Bearer(TOKEN.to_string());
+    QrngClient::connect(cfg).expect("connect");
+
+    let requests = server.recorded_requests();
+    assert_eq!(requests.len(), 1, "connect must send exactly one request");
+    assert_eq!(
+        header_value(&requests[0].headers, "Authorization"),
+        Some("Bearer super-secret-token-42"),
+        "Authorization must be exactly `Bearer <token>` with one space"
+    );
+}
+
+#[test]
+fn connect_with_api_auth_x_api_key_sets_x_api_key_header() {
+    const KEY: &str = "super-secret-key-99";
+    let server = TestServer::start();
+    server.set_capabilities_json(valid_capabilities_json());
+
+    let mut cfg = plain_http_config(&server.origin());
+    cfg.auth = ApiAuth::XApiKey(KEY.to_string());
+    QrngClient::connect(cfg).expect("connect");
+
+    let requests = server.recorded_requests();
+    assert_eq!(requests.len(), 1, "connect must send exactly one request");
+    assert_eq!(
+        header_value(&requests[0].headers, "X-API-KEY"),
+        Some("super-secret-key-99"),
+        "X-API-KEY must be exactly the configured value"
+    );
+}
+
+#[test]
+fn api_auth_bearer_debug_does_not_contain_token() {
+    const TOKEN: &str = "super-secret-token-42";
+    let debug = format!("{:?}", ApiAuth::Bearer(TOKEN.to_string()));
+    assert!(
+        !debug.contains(TOKEN),
+        "ApiAuth::Bearer Debug must not contain the token, got {debug:?}"
+    );
+}
+
+#[test]
+fn api_auth_x_api_key_debug_does_not_contain_key() {
+    const KEY: &str = "super-secret-key-99";
+    let debug = format!("{:?}", ApiAuth::XApiKey(KEY.to_string()));
+    assert!(
+        !debug.contains(KEY),
+        "ApiAuth::XApiKey Debug must not contain the key, got {debug:?}"
+    );
+}

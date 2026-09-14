@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
@@ -17,11 +18,20 @@ pub enum TransportMode {
     },
 }
 
-#[derive(Debug)]
 pub enum ApiAuth {
     None,
     Bearer(String),
     XApiKey(String),
+}
+
+impl fmt::Debug for ApiAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ApiAuth::None => f.write_str("None"),
+            ApiAuth::Bearer(_) => f.write_str("Bearer"),
+            ApiAuth::XApiKey(_) => f.write_str("XApiKey"),
+        }
+    }
 }
 
 #[derive(Debug)]

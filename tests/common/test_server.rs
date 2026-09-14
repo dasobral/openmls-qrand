@@ -14,8 +14,6 @@ use tiny_http::{Header, Response, Server};
 pub struct RecordedRequest {
     pub method: String,
     pub path: String,
-    // Retained for authentication, entropy, and transport tests.
-    #[allow(dead_code)]
     pub headers: Vec<(String, String)>,
     #[allow(dead_code)]
     pub body: Vec<u8>,

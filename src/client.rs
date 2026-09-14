@@ -28,7 +28,7 @@ impl QrngClient {
             .build()?;
 
         let url = capabilities_url(&config.base_url);
-        let response = http.get(url).send()?;
+        let response = apply_auth(http.get(url), &config.auth).send()?;
         let status = response.status();
         if !status.is_success() {
             return Err(QrngError::HttpStatus(status));
@@ -64,17 +64,23 @@ impl fmt::Debug for QrngClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("QrngClient")
             .field("base_url", &self.base_url)
-            .field(
-                "auth",
-                &match self.auth {
-                    ApiAuth::None => "None",
-                    ApiAuth::Bearer(_) => "Bearer",
-                    ApiAuth::XApiKey(_) => "XApiKey",
-                },
-            )
+            .field("auth", &self.auth)
             .field("entropy_type", &self.entropy_type)
             .field("capabilities", &self.capabilities)
             .finish_non_exhaustive()
+    }
+}
+
+fn apply_auth(
+    request: reqwest::blocking::RequestBuilder,
+    auth: &ApiAuth,
+) -> reqwest::blocking::RequestBuilder {
+    match auth {
+        ApiAuth::None => request,
+        ApiAuth::Bearer(token) => {
+            request.header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
+        }
+        ApiAuth::XApiKey(value) => request.header("X-API-KEY", value.as_str()),
     }
 }
 
