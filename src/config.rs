@@ -3,6 +3,8 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use reqwest::redirect::Policy;
+
 use crate::error::QrngError;
 
 #[derive(Debug)]
@@ -114,6 +116,36 @@ impl QrngConfig {
 
         Ok(())
     }
+
+    pub(crate) fn build_http_client(&self) -> Result<reqwest::blocking::Client, QrngError> {
+        let mut builder = reqwest::blocking::Client::builder()
+            .timeout(self.request_timeout)
+            .redirect(Policy::none());
+
+        match &self.transport {
+            TransportMode::PlainHttp => {}
+            TransportMode::Tls { ca_cert_pem } => {
+                if let Some(path) = ca_cert_pem {
+                    for cert in parse_ca_cert(path)? {
+                        builder = builder.add_root_certificate(cert);
+                    }
+                }
+            }
+            TransportMode::MutualTls {
+                ca_cert_pem,
+                client_cert_pem,
+                client_key_pem,
+            } => {
+                for cert in parse_ca_cert(ca_cert_pem)? {
+                    builder = builder.add_root_certificate(cert);
+                }
+                let identity = parse_client_identity(client_cert_pem, client_key_pem)?;
+                builder = builder.identity(identity);
+            }
+        }
+
+        Ok(builder.build()?)
+    }
 }
 
 fn read_tls_file(path: &Path) -> Result<Vec<u8>, QrngError> {
@@ -121,7 +153,7 @@ fn read_tls_file(path: &Path) -> Result<Vec<u8>, QrngError> {
         .map_err(|err| QrngError::TlsMaterial(format!("unable to read {}: {err}", path.display())))
 }
 
-fn parse_ca_cert(path: &Path) -> Result<(), QrngError> {
+fn parse_ca_cert(path: &Path) -> Result<Vec<reqwest::Certificate>, QrngError> {
     let pem = read_tls_file(path)?;
     // rustls-backed `Certificate::from_pem` stores bytes without parsing; the
     // bundle parser actually validates PEM and DER.
@@ -137,20 +169,23 @@ fn parse_ca_cert(path: &Path) -> Result<(), QrngError> {
             path.display()
         )));
     }
-    Ok(())
+    Ok(certs)
 }
 
-fn parse_client_identity(cert_path: &Path, key_path: &Path) -> Result<(), QrngError> {
+fn parse_client_identity(
+    cert_path: &Path,
+    key_path: &Path,
+) -> Result<reqwest::Identity, QrngError> {
     let cert = read_tls_file(cert_path)?;
     let key = read_tls_file(key_path)?;
     let mut identity_pem = cert;
     identity_pem.extend_from_slice(&key);
-    reqwest::Identity::from_pem(&identity_pem).map_err(|err| {
+    let identity = reqwest::Identity::from_pem(&identity_pem).map_err(|err| {
         QrngError::TlsMaterial(format!(
             "malformed client identity PEM from {} and {}: {err}",
             cert_path.display(),
             key_path.display()
         ))
     })?;
-    Ok(())
+    Ok(identity)
 }

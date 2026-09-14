@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use reqwest::redirect::Policy;
 use reqwest::StatusCode;
 use reqwest::Url;
 
@@ -45,13 +44,7 @@ pub struct QrngClient {
 impl QrngClient {
     pub fn connect(config: QrngConfig) -> Result<Self, QrngError> {
         config.validate()?;
-
-        // Task 2: one blocking client with timeout and no redirects.
-        // Custom CA and mTLS identity are installed in Task 9.
-        let http = reqwest::blocking::Client::builder()
-            .timeout(config.request_timeout)
-            .redirect(Policy::none())
-            .build()?;
+        let http = config.build_http_client()?;
 
         let url = capabilities_url(&config.base_url);
         let response = apply_auth(http.get(url), &config.auth).send()?;

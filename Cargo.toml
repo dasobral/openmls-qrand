@@ -17,3 +17,5 @@ thiserror = "2"
 [dev-dependencies]
 tiny_http = "0.12"
 openmls_rust_crypto = "0.6.0"
+rcgen = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
