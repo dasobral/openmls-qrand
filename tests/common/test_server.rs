@@ -31,11 +31,17 @@ struct EntropyOverride {
     body: Vec<u8>,
 }
 
+struct HealthStub {
+    status: u16,
+    body: Vec<u8>,
+}
+
 struct Shared {
     requests: Mutex<Vec<RecordedRequest>>,
     capabilities: Mutex<Option<CapabilitiesStub>>,
     entropy_queue: Mutex<VecDeque<EntropyOverride>>,
     entropy_default_status: Mutex<u16>,
+    health: Mutex<Option<HealthStub>>,
 }
 
 /// Deterministic per-block payload: byte `i` is `i % 256`.
@@ -66,6 +72,7 @@ impl TestServer {
             capabilities: Mutex::new(None),
             entropy_queue: Mutex::new(VecDeque::new()),
             entropy_default_status: Mutex::new(200),
+            health: Mutex::new(None),
         });
         let running = Arc::new(AtomicBool::new(true));
 
@@ -155,6 +162,36 @@ impl TestServer {
     pub fn enqueue_entropy_json(&self, status: u16, body: serde_json::Value) {
         self.enqueue_entropy_raw(status, body.to_string().into_bytes());
     }
+
+    pub fn set_health_json(&self, body: serde_json::Value) {
+        self.set_health_raw(body.to_string().into_bytes());
+    }
+
+    pub fn set_health_raw(&self, body: impl Into<Vec<u8>>) {
+        let mut slot = self.shared.health.lock().expect("health lock");
+        match slot.as_mut() {
+            Some(stub) => stub.body = body.into(),
+            None => {
+                *slot = Some(HealthStub {
+                    status: 200,
+                    body: body.into(),
+                });
+            }
+        }
+    }
+
+    pub fn set_health_status(&self, status: u16) {
+        let mut slot = self.shared.health.lock().expect("health lock");
+        match slot.as_mut() {
+            Some(stub) => stub.status = status,
+            None => {
+                *slot = Some(HealthStub {
+                    status,
+                    body: Vec::new(),
+                });
+            }
+        }
+    }
 }
 
 impl Drop for TestServer {
@@ -207,10 +244,13 @@ fn serve(server: Arc<Server>, shared: Arc<Shared>, running: Arc<AtomicBool>) {
 
         let is_capabilities = method.eq_ignore_ascii_case("GET") && path_is_capabilities(&path);
         let is_entropy = method.eq_ignore_ascii_case("POST") && path_is_entropy(&path);
+        let is_health = method.eq_ignore_ascii_case("GET") && path_is_healthtest(&path);
         let response = if is_capabilities {
             capabilities_response(&shared)
         } else if is_entropy {
             entropy_response(&shared, &body)
+        } else if is_health {
+            health_response(&shared)
         } else {
             Response::from_data(b"not found".to_vec()).with_status_code(404)
         };
@@ -271,4 +311,16 @@ fn path_is_capabilities(path: &str) -> bool {
 
 fn path_is_entropy(path: &str) -> bool {
     path == "/v1/entropy" || path.ends_with("/v1/entropy")
+}
+
+fn path_is_healthtest(path: &str) -> bool {
+    path == "/v1/healthtest" || path.ends_with("/v1/healthtest")
+}
+
+fn health_response(shared: &Shared) -> Response<std::io::Cursor<Vec<u8>>> {
+    let health = shared.health.lock().expect("health lock");
+    match health.as_ref() {
+        Some(stub) => json_response(stub.status, stub.body.clone()),
+        None => Response::from_data(b"not found".to_vec()).with_status_code(404),
+    }
 }

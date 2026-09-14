@@ -1,12 +1,11 @@
-//! QRNG Open API contract tests. This file starts with capabilities bootstrap;
-//! later tasks add entropy, auth, and health cases here.
+//! QRNG Open API contract tests: capabilities, entropy, auth, and health parsing.
 
 mod common;
 
 use std::time::Duration;
 
 use openmls_qrng_provider::{
-    ApiAuth, Capabilities, QrngClient, QrngConfig, QrngError, TransportMode,
+    ApiAuth, Capabilities, HealthReport, QrngClient, QrngConfig, QrngError, TransportMode,
 };
 use serde_json::json;
 
@@ -737,5 +736,212 @@ fn fetch_entropy_omits_entropy_type_when_not_configured() {
         entropy_body(posts[0]).get("entropy_type").is_none(),
         "entropy_type must be absent when not configured, got {}",
         entropy_body(posts[0])
+    );
+}
+
+fn health_gets(
+    requests: &[common::test_server::RecordedRequest],
+) -> Vec<&common::test_server::RecordedRequest> {
+    requests
+        .iter()
+        .filter(|request| {
+            request.method.eq_ignore_ascii_case("GET")
+                && (request.path == "/v1/healthtest" || request.path.ends_with("/v1/healthtest"))
+        })
+        .collect()
+}
+
+fn default_health_json() -> serde_json::Value {
+    json!({
+        "test_result": [
+            {
+                "test_type": "nist_90b",
+                "test_result": 0.94,
+                "time_stamp": "2026-09-14T10:00:00Z",
+                "report_link": "https://example.test/health/nist_90b"
+            },
+            {
+                "test_type": "vendor_status",
+                "test_result": "ok",
+                "time_stamp": "2026-09-14T10:00:01Z"
+            }
+        ]
+    })
+}
+
+fn assert_parsed_default_health(report: &HealthReport) {
+    assert_eq!(report.test_result.len(), 2);
+    assert_eq!(report.test_result[0].test_type, "nist_90b");
+    assert_eq!(report.test_result[0].test_result, json!(0.94));
+    assert_eq!(report.test_result[0].time_stamp, "2026-09-14T10:00:00Z");
+    assert_eq!(
+        report.test_result[0].report_link.as_deref(),
+        Some("https://example.test/health/nist_90b")
+    );
+    assert_eq!(report.test_result[1].test_type, "vendor_status");
+    assert_eq!(report.test_result[1].test_result, json!("ok"));
+    assert_eq!(report.test_result[1].time_stamp, "2026-09-14T10:00:01Z");
+    assert_eq!(report.test_result[1].report_link, None);
+    assert!(report.extensions.is_empty());
+}
+
+#[test]
+fn fetch_health_parses_successful_response() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.set_health_json(default_health_json());
+
+    let report = client
+        .fetch_health()
+        .expect("successful health JSON must parse");
+    assert_parsed_default_health(&report);
+}
+
+#[test]
+fn fetch_health_preserves_unknown_extensions() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.set_health_json(json!({
+        "test_result": [
+            {
+                "test_type": "nist_90b",
+                "test_result": 0.94,
+                "time_stamp": "2026-09-14T10:00:00Z"
+            }
+        ],
+        "extensions": [
+            { "vendor_health_flag": true, "detail": "keep-me" }
+        ],
+        "future_top_level": { "ignored": true }
+    }));
+
+    let report = client
+        .fetch_health()
+        .expect("unknown extensions must be preserved");
+    assert_eq!(report.test_result.len(), 1);
+    assert_eq!(report.test_result[0].test_type, "nist_90b");
+    assert_eq!(
+        report.extensions,
+        vec![json!({ "vendor_health_flag": true, "detail": "keep-me" })]
+    );
+}
+
+#[test]
+fn fetch_health_test_result_supports_numeric_and_string_json() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.set_health_json(json!({
+        "test_result": [
+            {
+                "test_type": "nist_90b",
+                "test_result": 0.94,
+                "time_stamp": "2026-09-14T10:00:00Z"
+            },
+            {
+                "test_type": "vendor_status",
+                "test_result": "ok",
+                "time_stamp": "2026-09-14T10:00:01Z"
+            }
+        ]
+    }));
+
+    let report = client
+        .fetch_health()
+        .expect("numeric and string test_result values must parse");
+    assert_eq!(report.test_result[0].test_result, json!(0.94));
+    assert!(
+        report.test_result[0].test_result.is_number(),
+        "numeric test_result must remain JSON number, got {}",
+        report.test_result[0].test_result
+    );
+    assert_eq!(report.test_result[1].test_result, json!("ok"));
+    assert!(
+        report.test_result[1].test_result.is_string(),
+        "string test_result must remain JSON string, got {}",
+        report.test_result[1].test_result
+    );
+}
+
+#[test]
+fn fetch_health_http_503_maps_to_health_unavailable() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.set_health_json(json!({ "error": "temporarily down" }));
+    server.set_health_status(503);
+
+    let err = client.fetch_health().expect_err("HTTP 503 must fail");
+    assert!(
+        matches!(err, QrngError::HealthUnavailable),
+        "expected HealthUnavailable, got {err:?}"
+    );
+}
+
+#[test]
+fn fetch_health_malformed_json_rejected_as_protocol() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.set_health_raw(b"this is not json".to_vec());
+    server.set_health_status(200);
+
+    let err = client
+        .fetch_health()
+        .expect_err("malformed health JSON must be rejected");
+    assert!(
+        matches!(err, QrngError::Protocol(_)),
+        "expected Protocol, got {err:?}"
+    );
+}
+
+#[test]
+fn fetch_health_sends_get_to_healthtest_path() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.set_health_json(default_health_json());
+
+    client.fetch_health().expect("fetch_health");
+
+    let requests = server.recorded_requests();
+    let gets = health_gets(&requests);
+    assert_eq!(gets.len(), 1, "fetch_health must send exactly one GET");
+    assert_eq!(gets[0].method, "GET");
+    assert_eq!(gets[0].path, "/v1/healthtest");
+}
+
+#[test]
+fn fetch_health_joins_base_url_path_prefix_to_healthtest_path() {
+    let server = TestServer::start();
+    server.set_capabilities_json(valid_capabilities_json());
+    server.set_health_json(default_health_json());
+
+    let base = format!("{}/qrng", server.origin());
+    let client = QrngClient::connect(plain_http_config(&base)).expect("connect with path prefix");
+    client.fetch_health().expect("fetch_health");
+
+    let requests = server.recorded_requests();
+    let gets = health_gets(&requests);
+    assert_eq!(gets.len(), 1, "fetch_health must send exactly one GET");
+    assert_eq!(gets[0].method, "GET");
+    assert_eq!(gets[0].path, "/qrng/v1/healthtest");
+}
+
+#[test]
+fn fetch_health_with_api_auth_bearer_sets_authorization_header() {
+    const TOKEN: &str = "super-secret-token-42";
+    let server = TestServer::start();
+    server.set_capabilities_json(valid_capabilities_json());
+    server.set_health_json(default_health_json());
+
+    let mut cfg = plain_http_config(&server.origin());
+    cfg.auth = ApiAuth::Bearer(TOKEN.to_string());
+    let client = QrngClient::connect(cfg).expect("connect");
+    client.fetch_health().expect("fetch_health");
+
+    let requests = server.recorded_requests();
+    let gets = health_gets(&requests);
+    assert_eq!(gets.len(), 1);
+    assert_eq!(
+        header_value(&gets[0].headers, "Authorization"),
+        Some("Bearer super-secret-token-42"),
+        "health GET must reuse apply_auth Bearer header"
     );
 }

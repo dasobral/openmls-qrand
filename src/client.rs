@@ -8,7 +8,7 @@ use reqwest::Url;
 
 use crate::config::{ApiAuth, QrngConfig};
 use crate::error::QrngError;
-use crate::model::{Capabilities, EntropyRequest, EntropyResponse};
+use crate::model::{Capabilities, EntropyRequest, EntropyResponse, HealthReport};
 
 pub struct QrngClient {
     http: reqwest::blocking::Client,
@@ -82,6 +82,21 @@ impl QrngClient {
         Ok(out)
     }
 
+    pub fn fetch_health(&self) -> Result<HealthReport, QrngError> {
+        let url = healthtest_url(&self.base_url);
+        let response = apply_auth(self.http.get(url), &self.auth).send()?;
+        let status = response.status();
+        if status == StatusCode::SERVICE_UNAVAILABLE {
+            return Err(QrngError::HealthUnavailable);
+        }
+        if !status.is_success() {
+            return Err(QrngError::HttpStatus(status));
+        }
+
+        let body = response.bytes()?;
+        serde_json::from_slice(&body).map_err(|_| QrngError::Protocol("invalid JSON".to_owned()))
+    }
+
     fn fetch_one_block(&self, n: usize) -> Result<Vec<u8>, QrngError> {
         let url = entropy_url(&self.base_url);
         let request = EntropyRequest {
@@ -153,6 +168,10 @@ fn capabilities_url(base: &Url) -> Url {
 
 fn entropy_url(base: &Url) -> Url {
     join_v1(base, "entropy")
+}
+
+fn healthtest_url(base: &Url) -> Url {
+    join_v1(base, "healthtest")
 }
 
 fn join_v1(base: &Url, resource: &str) -> Url {

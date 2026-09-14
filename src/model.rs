@@ -73,3 +73,20 @@ pub(crate) struct EntropyResponse {
     #[allow(dead_code)]
     pub(crate) extensions: Vec<serde_json::Value>,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HealthTestResult {
+    pub test_type: String,
+    pub test_result: serde_json::Value,
+    pub time_stamp: String,
+    #[serde(default)]
+    pub report_link: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HealthReport {
+    #[serde(default)]
+    pub test_result: Vec<HealthTestResult>,
+    #[serde(default)]
+    pub extensions: Vec<serde_json::Value>,
+}
