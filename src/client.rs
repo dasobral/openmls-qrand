@@ -1,4 +1,6 @@
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -8,7 +10,28 @@ use reqwest::Url;
 
 use crate::config::{ApiAuth, QrngConfig};
 use crate::error::QrngError;
+use crate::health::ProviderMetricsSnapshot;
 use crate::model::{Capabilities, EntropyRequest, EntropyResponse, HealthReport};
+
+struct ProviderMetrics {
+    entropy_requests_total: AtomicU64,
+    entropy_bytes_total: AtomicU64,
+    entropy_failures_total: AtomicU64,
+    health_polls_total: AtomicU64,
+    health_poll_failures_total: AtomicU64,
+}
+
+impl ProviderMetrics {
+    fn new() -> Self {
+        Self {
+            entropy_requests_total: AtomicU64::new(0),
+            entropy_bytes_total: AtomicU64::new(0),
+            entropy_failures_total: AtomicU64::new(0),
+            health_polls_total: AtomicU64::new(0),
+            health_poll_failures_total: AtomicU64::new(0),
+        }
+    }
+}
 
 pub struct QrngClient {
     http: reqwest::blocking::Client,
@@ -16,6 +39,7 @@ pub struct QrngClient {
     auth: ApiAuth,
     entropy_type: Option<String>,
     capabilities: Capabilities,
+    metrics: Arc<ProviderMetrics>,
 }
 
 impl QrngClient {
@@ -54,6 +78,7 @@ impl QrngClient {
             auth: config.auth,
             entropy_type: config.entropy_type,
             capabilities,
+            metrics: Arc::new(ProviderMetrics::new()),
         })
     }
 
@@ -66,6 +91,54 @@ impl QrngClient {
             return Ok(Vec::new());
         }
 
+        match self.fetch_entropy_inner(len) {
+            Ok(out) => {
+                self.metrics
+                    .entropy_requests_total
+                    .fetch_add(1, Ordering::Relaxed);
+                self.metrics
+                    .entropy_bytes_total
+                    .fetch_add(out.len() as u64, Ordering::Relaxed);
+                Ok(out)
+            }
+            Err(err) => {
+                self.metrics
+                    .entropy_failures_total
+                    .fetch_add(1, Ordering::Relaxed);
+                Err(err)
+            }
+        }
+    }
+
+    pub fn fetch_health(&self) -> Result<HealthReport, QrngError> {
+        self.metrics
+            .health_polls_total
+            .fetch_add(1, Ordering::Relaxed);
+        match self.fetch_health_inner() {
+            Ok(report) => Ok(report),
+            Err(err) => {
+                self.metrics
+                    .health_poll_failures_total
+                    .fetch_add(1, Ordering::Relaxed);
+                Err(err)
+            }
+        }
+    }
+
+    pub fn metrics_snapshot(&self) -> ProviderMetricsSnapshot {
+        ProviderMetricsSnapshot {
+            entropy_requests_total: self.metrics.entropy_requests_total.load(Ordering::Relaxed),
+            entropy_bytes_total: self.metrics.entropy_bytes_total.load(Ordering::Relaxed),
+            entropy_failures_total: self.metrics.entropy_failures_total.load(Ordering::Relaxed),
+            health_polls_total: self.metrics.health_polls_total.load(Ordering::Relaxed),
+            health_poll_failures_total: self
+                .metrics
+                .health_poll_failures_total
+                .load(Ordering::Relaxed),
+        }
+    }
+
+    fn fetch_entropy_inner(&self, len: usize) -> Result<Vec<u8>, QrngError> {
         let mut out = Vec::with_capacity(len);
         let min_block = self.capabilities.entropy.min_block_size;
         let max_block = self.capabilities.entropy.max_block_size;
@@ -82,7 +155,7 @@ impl QrngClient {
         Ok(out)
     }
 
-    pub fn fetch_health(&self) -> Result<HealthReport, QrngError> {
+    fn fetch_health_inner(&self) -> Result<HealthReport, QrngError> {
         let url = healthtest_url(&self.base_url);
         let response = apply_auth(self.http.get(url), &self.auth).send()?;
         let status = response.status();
