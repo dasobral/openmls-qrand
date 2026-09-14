@@ -1,7 +1,4 @@
-//! OpenMlsRand contract tests (spec 20.6).
-//!
-//! These tests target `QrngRand` (Task 5). They compile only after `src/rand.rs`
-//! exists and `QrngRand` is re-exported from `lib.rs`.
+//! OpenMlsRand contract tests (spec 20.6) and Task 8 OpenMlsProvider composition.
 
 mod common;
 
@@ -9,8 +6,14 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use openmls_qrng_provider::{ApiAuth, QrngClient, QrngConfig, QrngError, QrngRand, TransportMode};
+use openmls_qrng_provider::{
+    ApiAuth, QrngClient, QrngConfig, QrngError, QrngOpenMlsProvider, QrngRand, TransportMode,
+};
+use openmls_rust_crypto::{MemoryStorage, RustCrypto};
+use openmls_traits::crypto::OpenMlsCrypto;
 use openmls_traits::random::OpenMlsRand;
+use openmls_traits::types::HashType;
+use openmls_traits::OpenMlsProvider;
 use serde_json::json;
 
 use common::test_server::default_entropy_block;
@@ -139,4 +142,73 @@ fn concurrent_random_vec_callers_receive_expected_pattern_bytes() {
     assert_eq!(right_bytes.len(), right_len);
     assert_eq!(left_bytes, default_entropy_block(left_len));
     assert_eq!(right_bytes, default_entropy_block(right_len));
+}
+
+fn connect_provider(server: &TestServer) -> QrngOpenMlsProvider<RustCrypto, MemoryStorage> {
+    let rand = connect_rand(server);
+    QrngOpenMlsProvider::new(RustCrypto::default(), MemoryStorage::default(), rand)
+}
+
+#[test]
+fn qrng_openmls_provider_constructs_with_rustcrypto_and_memory_storage() {
+    let server = TestServer::start();
+    let provider = connect_provider(&server);
+
+    let _: &RustCrypto = provider.crypto();
+    let _: &MemoryStorage = provider.storage();
+    let _: &QrngRand = provider.rand();
+}
+
+#[test]
+fn provider_rand_random_array_32_returns_mock_qrng_bytes() {
+    let server = TestServer::start();
+    let provider = connect_provider(&server);
+
+    let bytes = provider
+        .rand()
+        .random_array::<32>()
+        .expect("composed provider.rand() must use live QrngRand against the mock");
+    assert_eq!(bytes.len(), 32);
+    assert_eq!(&bytes[..], default_entropy_block(32).as_slice());
+}
+
+#[test]
+fn provider_crypto_and_storage_return_injected_instances() {
+    let server = TestServer::start();
+    let rand = connect_rand(&server);
+    let crypto = RustCrypto::default();
+    let storage = MemoryStorage::default();
+    storage
+        .values
+        .write()
+        .expect("memory storage write")
+        .insert(b"task-8-marker".to_vec(), b"injected-storage".to_vec());
+
+    let provider = QrngOpenMlsProvider::new(crypto, storage, rand);
+
+    let digest = provider
+        .crypto()
+        .hash(HashType::Sha2_256, b"abc")
+        .expect("hash must not require OpenMlsRand");
+    // FIPS 180-2 SHA-256("abc")
+    let expected_sha256 = [
+        0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22,
+        0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00,
+        0x15, 0xad,
+    ];
+    assert_eq!(digest, expected_sha256);
+
+    let stored = provider
+        .storage()
+        .values
+        .read()
+        .expect("memory storage read")
+        .get(&b"task-8-marker".to_vec())
+        .cloned();
+    assert_eq!(stored.as_deref(), Some(&b"injected-storage"[..]));
+
+    let crypto_ptr = provider.crypto() as *const RustCrypto;
+    let storage_ptr = provider.storage() as *const MemoryStorage;
+    assert_eq!(crypto_ptr, provider.crypto() as *const RustCrypto);
+    assert_eq!(storage_ptr, provider.storage() as *const MemoryStorage);
 }

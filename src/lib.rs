@@ -3,6 +3,7 @@ mod config;
 mod error;
 mod health;
 mod model;
+mod provider;
 mod rand;
 
 pub use client::QrngClient;
@@ -10,4 +11,5 @@ pub use config::{ApiAuth, QrngConfig, TransportMode};
 pub use error::QrngError;
 pub use health::{HealthMonitor, HealthSnapshot, ProviderMetricsSnapshot};
 pub use model::{Capabilities, EntropyCapabilities, HealthReport, HealthTestResult};
+pub use provider::QrngOpenMlsProvider;
 pub use rand::QrngRand;
