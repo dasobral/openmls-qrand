@@ -1,7 +1,7 @@
 //! Real OpenMLS 0.9.0 integration (spec 20.9).
 //!
 //! Exercises `QrngOpenMlsProvider` through the public OpenMLS group-creation API
-//! and asserts that OpenMLS consumed `provider.rand()` as `POST /v1/entropy`.
+//! and asserts that OpenMLS consumed `provider.rand()` as `POST /entropy`.
 //! Does not claim that randomness internal to `OpenMlsCrypto` is QRNG-backed.
 
 mod common;
@@ -52,7 +52,7 @@ fn entropy_post_count(server: &TestServer) -> usize {
         .into_iter()
         .filter(|req| {
             req.method.eq_ignore_ascii_case("POST")
-                && (req.path == "/v1/entropy" || req.path.ends_with("/v1/entropy"))
+                && (req.path == "/entropy" || req.path.ends_with("/entropy"))
         })
         .count()
 }
@@ -87,7 +87,7 @@ fn mls_group_new_invokes_qrng_entropy() {
     let entropy_before = entropy_post_count(&server);
     assert_eq!(
         entropy_before, 0,
-        "connect and signature-key generation must not POST /v1/entropy"
+        "connect and signature-key generation must not POST /entropy"
     );
 
     let group = MlsGroup::new(
@@ -101,7 +101,7 @@ fn mls_group_new_invokes_qrng_entropy() {
     let entropy_after = entropy_post_count(&server);
     assert!(
         entropy_after > entropy_before,
-        "MlsGroup::new must invoke POST /v1/entropy via OpenMlsRand; before={entropy_before} after={entropy_after}"
+        "MlsGroup::new must invoke POST /entropy via OpenMlsRand; before={entropy_before} after={entropy_after}"
     );
 
     assert!(

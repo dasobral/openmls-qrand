@@ -116,7 +116,7 @@ fn health_gets(requests: &[RecordedRequest]) -> Vec<&RecordedRequest> {
         .iter()
         .filter(|request| {
             request.method.eq_ignore_ascii_case("GET")
-                && (request.path == "/v1/healthtest" || request.path.ends_with("/v1/healthtest"))
+                && (request.path == "/healthtest" || request.path.ends_with("/healthtest"))
         })
         .collect()
 }
@@ -228,7 +228,7 @@ fn immediate_first_poll_populates_snapshot_without_waiting_full_interval() {
     );
     assert!(
         health_get_count(&server) >= 1,
-        "immediate first poll must GET /v1/healthtest"
+        "immediate first poll must GET /healthtest"
     );
 }
 
