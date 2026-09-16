@@ -620,15 +620,15 @@ fn parse_block_size(body: &[u8]) -> Option<usize> {
 }
 
 fn path_is_capabilities(path: &str) -> bool {
-    path == "/v1/capabilities" || path.ends_with("/v1/capabilities")
+    path == "/capabilities" || path.ends_with("/capabilities")
 }
 
 fn path_is_entropy(path: &str) -> bool {
-    path == "/v1/entropy" || path.ends_with("/v1/entropy")
+    path == "/entropy" || path.ends_with("/entropy")
 }
 
 fn path_is_healthtest(path: &str) -> bool {
-    path == "/v1/healthtest" || path.ends_with("/v1/healthtest")
+    path == "/healthtest" || path.ends_with("/healthtest")
 }
 
 fn health_body(shared: &Shared) -> (u16, Vec<u8>) {

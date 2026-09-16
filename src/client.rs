@@ -229,25 +229,25 @@ fn apply_auth(
 }
 
 fn capabilities_url(base: &Url) -> Url {
-    join_v1(base, "capabilities")
+    join_resource(base, "capabilities")
 }
 
 fn entropy_url(base: &Url) -> Url {
-    join_v1(base, "entropy")
+    join_resource(base, "entropy")
 }
 
 fn healthtest_url(base: &Url) -> Url {
-    join_v1(base, "healthtest")
+    join_resource(base, "healthtest")
 }
 
-fn join_v1(base: &Url, resource: &str) -> Url {
+fn join_resource(base: &Url, resource: &str) -> Url {
     let mut url = base.clone();
     let path = url.path();
     let path = path.strip_suffix('/').unwrap_or(path);
     let joined = if path.is_empty() {
-        format!("/v1/{resource}")
+        format!("/{resource}")
     } else {
-        format!("{path}/v1/{resource}")
+        format!("{path}/{resource}")
     };
     url.set_path(&joined);
     url

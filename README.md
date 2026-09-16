@@ -46,9 +46,9 @@ There is no insecure-TLS option. `Tls { ca_cert_pem: None }` uses the rustls web
 
 `QrngClient::connect` talks to the QRNG Open API over a blocking HTTP client:
 
-- `GET /v1/capabilities` — discovered at connect time
-- `POST /v1/entropy` — entropy retrieval for `OpenMlsRand`
-- `GET /v1/healthtest` — health reporting for `QrngClient::fetch_health` and `HealthMonitor`
+- `GET /capabilities` — discovered at connect time
+- `POST /entropy` — entropy retrieval for `OpenMlsRand`
+- `GET /healthtest` — health reporting for `QrngClient::fetch_health` and `HealthMonitor`
 
 ## Fail-closed behavior
 

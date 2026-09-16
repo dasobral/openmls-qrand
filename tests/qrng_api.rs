@@ -249,7 +249,7 @@ fn connect_sends_exactly_one_get_to_capabilities_path() {
     let requests = server.recorded_requests();
     assert_eq!(requests.len(), 1, "connect must send exactly one request");
     assert_eq!(requests[0].method, "GET");
-    assert_eq!(requests[0].path, "/v1/capabilities");
+    assert_eq!(requests[0].path, "/capabilities");
 }
 
 #[test]
@@ -263,7 +263,7 @@ fn connect_joins_base_url_path_prefix_to_capabilities_path() {
     let requests = server.recorded_requests();
     assert_eq!(requests.len(), 1, "connect must send exactly one request");
     assert_eq!(requests[0].method, "GET");
-    assert_eq!(requests[0].path, "/qrng/v1/capabilities");
+    assert_eq!(requests[0].path, "/qrng/capabilities");
 }
 
 #[test]
@@ -414,7 +414,7 @@ fn entropy_posts(
         .iter()
         .filter(|request| {
             request.method.eq_ignore_ascii_case("POST")
-                && (request.path == "/v1/entropy" || request.path.ends_with("/v1/entropy"))
+                && (request.path == "/entropy" || request.path.ends_with("/entropy"))
         })
         .collect()
 }
@@ -424,7 +424,7 @@ fn entropy_body(request: &common::test_server::RecordedRequest) -> serde_json::V
 }
 
 fn assert_entropy_post_contract(request: &common::test_server::RecordedRequest) {
-    assert_eq!(request.path, "/v1/entropy");
+    assert_eq!(request.path, "/entropy");
     let body = entropy_body(request);
     assert_eq!(body["block_count"], json!(1));
     assert!(
@@ -746,7 +746,7 @@ fn health_gets(
         .iter()
         .filter(|request| {
             request.method.eq_ignore_ascii_case("GET")
-                && (request.path == "/v1/healthtest" || request.path.ends_with("/v1/healthtest"))
+                && (request.path == "/healthtest" || request.path.ends_with("/healthtest"))
         })
         .collect()
 }
@@ -904,7 +904,7 @@ fn fetch_health_sends_get_to_healthtest_path() {
     let gets = health_gets(&requests);
     assert_eq!(gets.len(), 1, "fetch_health must send exactly one GET");
     assert_eq!(gets[0].method, "GET");
-    assert_eq!(gets[0].path, "/v1/healthtest");
+    assert_eq!(gets[0].path, "/healthtest");
 }
 
 #[test]
@@ -921,7 +921,7 @@ fn fetch_health_joins_base_url_path_prefix_to_healthtest_path() {
     let gets = health_gets(&requests);
     assert_eq!(gets.len(), 1, "fetch_health must send exactly one GET");
     assert_eq!(gets[0].method, "GET");
-    assert_eq!(gets[0].path, "/qrng/v1/healthtest");
+    assert_eq!(gets[0].path, "/qrng/healthtest");
 }
 
 #[test]
