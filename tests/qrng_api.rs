@@ -39,6 +39,37 @@ fn valid_capabilities_json() -> serde_json::Value {
     })
 }
 
+/// Live Entropy Core `GET /capabilities` shape (nspawn QRNG Open API).
+fn entropy_core_capabilities_json() -> serde_json::Value {
+    json!({
+        "entropy": {
+            "entropy_types": ["processed", "raw"],
+            "extensions": [{
+                "Quside QRNG Entropy Quality Extension": [
+                    "Q-Factor", "H-min", "QES-ID", "timestamp", "unix_timestamp_ms"
+                ]
+            }],
+            "max_block_count": 16,
+            "max_block_size": 524288,
+            "min_block_count": 1,
+            "min_block_size": 32
+        },
+        "healthtest": {
+            "extensions": [{
+                "Quside QRNG Entropy Test Extension": [
+                    "Q-Factor", "H-min", "QES-ID", "test-detail", "timestamp", "unix_timestamp_ms"
+                ]
+            }],
+            "test_threshold": [{
+                "error": 0.93,
+                "good": 0.98,
+                "test_type": "NIST SP 800-22 Rev. 1 - Frequency Monobit",
+                "warning": 0.96
+            }]
+        }
+    })
+}
+
 fn assert_valid_capabilities(caps: &Capabilities) {
     assert_eq!(caps.entropy.min_block_size, 16);
     assert_eq!(caps.entropy.max_block_size, 1024);
@@ -795,6 +826,126 @@ fn fetch_health_parses_successful_response() {
         .fetch_health()
         .expect("successful health JSON must parse");
     assert_parsed_default_health(&report);
+}
+
+#[test]
+fn connect_accepts_entropy_core_capabilities() {
+    let server = TestServer::start();
+    server.set_capabilities_json(entropy_core_capabilities_json());
+
+    let client = QrngClient::connect(plain_http_config(&server.origin()))
+        .expect("Entropy Core capabilities must be accepted");
+    let caps = client.capabilities();
+    assert_eq!(caps.entropy.min_block_size, 32);
+    assert_eq!(caps.entropy.max_block_size, 524_288);
+    assert_eq!(caps.entropy.min_block_count, 1);
+    assert_eq!(caps.entropy.max_block_count, 16);
+    assert_eq!(
+        caps.entropy.entropy_types,
+        vec!["processed".to_string(), "raw".to_string()]
+    );
+    assert!(
+        caps.healthtest.is_some(),
+        "Entropy Core advertises healthtest"
+    );
+}
+
+#[test]
+fn fetch_entropy_parses_entropy_core_open_api_response() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, entropy_core_capabilities_json());
+    let block = vec![0x11u8; 32];
+    server.enqueue_entropy_json(
+        200,
+        json!({
+            "entropy": [BASE64.encode(&block)],
+            "extensions": [{
+                "H-min": 0.0,
+                "Q-factor": 0.0,
+                "QES-ID": "0",
+                "timestamp": "2026-09-16T13:37:46+02:00",
+                "unix_timestamp_ms": 1_789_558_666_492u64
+            }]
+        }),
+    );
+
+    let got = client
+        .fetch_entropy(32)
+        .expect("Entropy Core POST /entropy JSON must parse");
+    assert_eq!(got, block);
+}
+
+/// Live Entropy Core `GET /healthtest` omits Open API `time_stamp` on each
+/// result and places RFC 3339 `timestamp` in `extensions` instead.
+fn entropy_core_health_json() -> serde_json::Value {
+    json!({
+        "test_result": [
+            {
+                "test_type": "NIST SP 800-22 Rev. 1 - Frequency Monobit",
+                "test_result": 0.995
+            }
+        ],
+        "extensions": [
+            {
+                "QES-ID": "0",
+                "Q-factor": 0.0,
+                "H-min": 0.0,
+                "test-detail": "995/1000 Frequency",
+                "timestamp": "2026-09-15T22:28:14+02:00",
+                "unix_timestamp_ms": 1_789_504_094_160u64
+            }
+        ]
+    })
+}
+
+#[test]
+fn fetch_health_parses_entropy_core_response() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, entropy_core_capabilities_json());
+    server.set_health_json(entropy_core_health_json());
+
+    let report = client
+        .fetch_health()
+        .expect("Entropy Core healthtest JSON must parse");
+    assert_eq!(report.test_result.len(), 1);
+    assert_eq!(
+        report.test_result[0].test_type,
+        "NIST SP 800-22 Rev. 1 - Frequency Monobit"
+    );
+    assert_eq!(report.test_result[0].test_result, json!(0.995));
+    assert_eq!(
+        report.test_result[0].time_stamp,
+        "2026-09-15T22:28:14+02:00"
+    );
+    assert_eq!(report.extensions.len(), 1);
+    assert_eq!(
+        report.extensions[0]["timestamp"],
+        json!("2026-09-15T22:28:14+02:00")
+    );
+    assert_eq!(report.extensions[0]["Q-factor"], json!(0.0));
+}
+
+#[test]
+fn fetch_health_accepts_timestamp_alias_on_result() {
+    let server = TestServer::start();
+    let client = connect_plain(&server, valid_capabilities_json());
+    server.set_health_json(json!({
+        "test_result": [
+            {
+                "test_type": "nist_90b",
+                "test_result": 0.94,
+                "timestamp": "2026-09-15T22:28:14+02:00"
+            }
+        ]
+    }));
+
+    let report = client
+        .fetch_health()
+        .expect("timestamp must be accepted as time_stamp");
+    assert_eq!(
+        report.test_result[0].time_stamp,
+        "2026-09-15T22:28:14+02:00"
+    );
 }
 
 #[test]

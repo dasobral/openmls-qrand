@@ -101,12 +101,19 @@ fn live_connect_and_fetch_entropy() {
     );
 
     match client.fetch_health() {
-        Ok(report) => println!(
-            "healthtest: {} result(s), {} extension(s)",
-            report.test_result.len(),
-            report.extensions.len()
-        ),
-        Err(err) => println!("healthtest not usable yet: {err}"),
+        Ok(report) => {
+            assert!(
+                !report.test_result.is_empty(),
+                "live GET /healthtest must return at least one test_result"
+            );
+            println!(
+                "healthtest: {} result(s), {} extension(s), time_stamp={:?}",
+                report.test_result.len(),
+                report.extensions.len(),
+                report.test_result[0].time_stamp
+            );
+        }
+        Err(err) => panic!("live GET /healthtest must parse: {err}"),
     }
 
     let metrics = client.metrics_snapshot();
