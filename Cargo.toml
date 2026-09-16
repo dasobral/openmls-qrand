@@ -6,6 +6,11 @@ rust-version = "1.91"
 license = "MIT"
 description = "OpenMLS randomness provider backed by a QRNG Open API"
 repository = "https://github.com/dasobral/openmls-qrand"
+homepage = "https://github.com/dasobral/openmls-qrand"
+readme = "README.md"
+authors = ["Daniel SB <dasobral93@gmail.com>"]
+keywords = ["openmls", "mls", "qrng", "entropy", "randomness"]
+categories = ["cryptography", "network-programming"]
 
 [dependencies]
 openmls_traits = "0.6.0"
