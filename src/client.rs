@@ -160,7 +160,10 @@ impl QrngClient {
         }
 
         let body = response.bytes()?;
-        serde_json::from_slice(&body).map_err(|_| QrngError::Protocol("invalid JSON".to_owned()))
+        let mut report: HealthReport = serde_json::from_slice(&body)
+            .map_err(|err| QrngError::Protocol(format!("invalid healthtest JSON: {err}")))?;
+        fill_time_stamp_from_extensions(&mut report);
+        Ok(report)
     }
 
     fn fetch_one_block(&self, n: usize) -> Result<Vec<u8>, QrngError> {
@@ -225,6 +228,22 @@ fn apply_auth(
             request.header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
         }
         ApiAuth::XApiKey(value) => request.header("X-API-KEY", value.as_str()),
+    }
+}
+
+fn fill_time_stamp_from_extensions(report: &mut HealthReport) {
+    let fallback = report.extensions.iter().find_map(|ext| {
+        ext.get("timestamp")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    });
+    let Some(timestamp) = fallback else {
+        return;
+    };
+    for result in &mut report.test_result {
+        if result.time_stamp.is_empty() {
+            result.time_stamp = timestamp.clone();
+        }
     }
 }
 

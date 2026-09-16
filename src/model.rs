@@ -78,6 +78,9 @@ pub(crate) struct EntropyResponse {
 pub struct HealthTestResult {
     pub test_type: String,
     pub test_result: serde_json::Value,
+    /// QRNG Open API field. Entropy Core omits it on each result and puts
+    /// RFC 3339 `timestamp` in `extensions` instead; also accepted as `timestamp`.
+    #[serde(default, alias = "timestamp")]
     pub time_stamp: String,
     #[serde(default)]
     pub report_link: Option<String>,
