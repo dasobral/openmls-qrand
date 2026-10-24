@@ -192,6 +192,24 @@ let provider = QrngOpenMlsProvider::new(
 );
 ```
 
+## Crypto-internal randomness: `EntropyRng`
+
+`QrngRand` covers the randomness OpenMLS draws through `OpenMlsRand`. Randomness drawn inside `OpenMlsCrypto` operations, such as the HPKE encapsulation in Welcome and UpdatePath encryption or signature key generation, comes from the crypto backend.
+
+`EntropyRng` exposes an `EntropyBackend` as a `rand` 0.10 `TryCryptoRng`. Pass it to a crypto backend that takes an entropy source to derive that randomness from the same backend. The OpenMLS libcrux provider's `CryptoProvider::with_entropy_source` takes one: it seeds and reseeds its HMAC-DRBG from the source, and draws all of its randomness, HPKE encapsulation included, from that DRBG. That constructor is on the [`dasobral/openmls`](https://github.com/dasobral/openmls) branch `feat/libcrux-provider-rng`, proposed upstream, and not yet in an OpenMLS release.
+
+```rust
+use std::sync::Arc;
+
+use openmls_libcrux_crypto::CryptoProvider;
+use openmls_qrand::{EntropyRng, QrngClient};
+
+let client = Arc::new(QrngClient::connect(config)?);
+let crypto = CryptoProvider::with_entropy_source(EntropyRng::new(client.clone()))?;
+```
+
+Like `QrngRand`, `EntropyRng` fails closed. The DRBG draws from the source only when it is seeded and when it reseeds, so the bytes used inside the crypto backend are DRBG output derived from source entropy, not raw source bytes. RustCrypto takes no entropy source, so `EntropyRng` does not change its internal randomness.
+
 ## Health monitoring
 
 `HealthMonitor::start` requires the endpoint to advertise `healthtest`. Otherwise it returns `QrngError::HealthUnsupported`.
@@ -229,7 +247,7 @@ let _ = (
 
 The library replaces the OpenMLS `OpenMlsRand` randomness source with QRNG Open API entropy.
 
-It does not replace randomness internal to every cryptographic backend, including randomness that may be used internally by `OpenMlsCrypto` implementations such as RustCrypto (`signature_key_gen`).
+It does not replace randomness internal to every cryptographic backend, including randomness that may be used internally by `OpenMlsCrypto` implementations such as RustCrypto (`signature_key_gen`). A crypto backend that takes an entropy source can derive its internal randomness from the same backend through `EntropyRng` (see above); that randomness is then DRBG output seeded from the source.
 
 It does not claim that all OpenMLS, RustCrypto, HPKE, TLS, or host-application randomness comes from the QRNG.
 

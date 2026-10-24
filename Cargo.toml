@@ -19,12 +19,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 thiserror = "2"
+# The `rand` 0.10 RNG traits, for `EntropyRng`.
+rand_core = "0.10"
 
 [features]
 # A deterministic in-process backend for development and tests. NOT an entropy source.
 mock = []
 
 [dev-dependencies]
+rand_core = "0.10"
 tiny_http = "0.12"
 openmls = "0.9.0"
 openmls_basic_credential = "0.6.0"
