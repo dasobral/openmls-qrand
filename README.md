@@ -168,6 +168,30 @@ If entropy cannot be obtained, decoded, or validated, `OpenMlsRand` returns an e
 
 There is no fallback to OS RNG, `/dev/urandom`, `getrandom`, `thread_rng`, RustCrypto RNG, cached entropy, or deterministic substitute data.
 
+## Entropy backends and the `mock` feature
+
+`QrngRand` and `QrngOpenMlsProvider` take their bytes from an `EntropyBackend`. The default backend is `QrngClient`, so `QrngRand::new(Arc<QrngClient>)` and `QrngOpenMlsProvider<C, S>` work as before. With `QrngRand<dyn EntropyBackend>`, the application picks the backend at run time.
+
+The opt-in `mock` feature adds `MockEntropy`, an in-process backend for development and tests. **`MockEntropy` is not an entropy source.** Its bytes come from a seeded SplitMix64 stream that anyone who knows the seed can predict. `set_available(false)` simulates an outage: every draw then fails with `QrngError::EntropyUnavailable` and uses no stream bytes. `MockEntropy` is never a fallback. An application gets it only by constructing it, and the default build does not contain it.
+
+```toml
+openmls_qrand = { git = "https://github.com/dasobral/openmls-qrand.git", features = ["mock"] }
+```
+
+```rust
+use std::sync::Arc;
+
+use openmls_qrand::{EntropyBackend, MockEntropy, QrngOpenMlsProvider, QrngRand};
+use openmls_rust_crypto::{MemoryStorage, RustCrypto};
+
+let backend: Arc<dyn EntropyBackend> = Arc::new(MockEntropy::new(42)); // MOCK, not random
+let provider = QrngOpenMlsProvider::new(
+    RustCrypto::default(),
+    MemoryStorage::default(),
+    QrngRand::new(backend),
+);
+```
+
 ## Health monitoring
 
 `HealthMonitor::start` requires the endpoint to advertise `healthtest`. Otherwise it returns `QrngError::HealthUnsupported`.
@@ -215,10 +239,13 @@ The current `openmls_rust_crypto::RustCrypto` implementation owns an internal RN
 
 Auditing or replacing randomness internal to `OpenMlsCrypto` implementations is out of scope for this crate.
 
+The claim covers the `QrngClient` backend only. A provider built on `MockEntropy` (the `mock` feature) gets predictable bytes and has no entropy claim.
+
 ## Development
 
 ```bash
 cargo test
+cargo test --features mock
 cargo fmt --all -- --check
 ```
 

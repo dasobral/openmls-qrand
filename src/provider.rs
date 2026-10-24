@@ -2,16 +2,18 @@ use openmls_traits::crypto::OpenMlsCrypto;
 use openmls_traits::storage::StorageProvider;
 use openmls_traits::OpenMlsProvider;
 
+use crate::backend::EntropyBackend;
+use crate::client::QrngClient;
 use crate::rand::QrngRand;
 
-pub struct QrngOpenMlsProvider<C, S> {
+pub struct QrngOpenMlsProvider<C, S, B: ?Sized + EntropyBackend = QrngClient> {
     crypto: C,
     storage: S,
-    rand: QrngRand,
+    rand: QrngRand<B>,
 }
 
-impl<C, S> QrngOpenMlsProvider<C, S> {
-    pub fn new(crypto: C, storage: S, rand: QrngRand) -> Self {
+impl<C, S, B: ?Sized + EntropyBackend> QrngOpenMlsProvider<C, S, B> {
+    pub fn new(crypto: C, storage: S, rand: QrngRand<B>) -> Self {
         Self {
             crypto,
             storage,
@@ -20,13 +22,14 @@ impl<C, S> QrngOpenMlsProvider<C, S> {
     }
 }
 
-impl<C, S> OpenMlsProvider for QrngOpenMlsProvider<C, S>
+impl<C, S, B> OpenMlsProvider for QrngOpenMlsProvider<C, S, B>
 where
     C: OpenMlsCrypto,
     S: StorageProvider<{ openmls_traits::storage::CURRENT_VERSION }>,
+    B: ?Sized + EntropyBackend,
 {
     type CryptoProvider = C;
-    type RandProvider = QrngRand;
+    type RandProvider = QrngRand<B>;
     type StorageProvider = S;
 
     fn storage(&self) -> &Self::StorageProvider {

@@ -21,3 +21,5 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Test
         run: cargo test
+      - name: Test (mock feature)
+        run: cargo test --features mock

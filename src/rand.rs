@@ -2,20 +2,24 @@ use std::sync::Arc;
 
 use openmls_traits::random::OpenMlsRand;
 
+use crate::backend::EntropyBackend;
 use crate::client::QrngClient;
 use crate::error::QrngError;
 
-pub struct QrngRand {
-    client: Arc<QrngClient>,
+/// `OpenMlsRand` over an [`EntropyBackend`], by default a [`QrngClient`].
+///
+/// `B` may be unsized, so `QrngRand<dyn EntropyBackend>` selects the backend at run time.
+pub struct QrngRand<B: ?Sized + EntropyBackend = QrngClient> {
+    client: Arc<B>,
 }
 
-impl QrngRand {
-    pub fn new(client: Arc<QrngClient>) -> Self {
+impl<B: ?Sized + EntropyBackend> QrngRand<B> {
+    pub fn new(client: Arc<B>) -> Self {
         Self { client }
     }
 }
 
-impl OpenMlsRand for QrngRand {
+impl<B: ?Sized + EntropyBackend> OpenMlsRand for QrngRand<B> {
     type Error = QrngError;
 
     fn random_array<const N: usize>(&self) -> Result<[u8; N], Self::Error> {
