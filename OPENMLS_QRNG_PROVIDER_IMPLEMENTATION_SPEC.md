@@ -387,6 +387,8 @@ pub struct QrngConfig {
 
 **Amendment (2026-10-25): post quantum TLS key exchange.** `Tls` and `MutualTls` use rustls with the aws-lc-rs provider, configured by this crate and handed to reqwest. `KeyExchange::PostQuantumOnly` (the default) offers only the hybrid group `X25519MLKEM768` over TLS 1.3, and refuses a server without it. `KeyExchange::PostQuantumPreferred` offers it first and accepts X25519, P-256 or P-384 from a server that has no post quantum group. Reason: the fetched entropy becomes key material, and a recorded classical key exchange could be broken later. Tests: `tests/pq_tls.rs`.
 
+**Amendment (2026-10-25): negotiated key exchange report.** `QrngClient::key_exchange()` returns `NegotiatedKeyExchange`: `PlainHttp`, `Group(name)` or, for `PostQuantumPreferred` only, `Unknown(reason)`. With `PostQuantumOnly` the group is `X25519MLKEM768` by construction. With `PostQuantumPreferred`, `connect` makes one extra TLS handshake directly over TCP with the same rustls configuration and reads the negotiated group, because reqwest does not expose it; a failed check is `Unknown`, not an error. Reason: `PostQuantumPreferred` can fall back to a classical group, and a downgrade must be visible. Tests: `tests/pq_tls.rs`.
+
 Defaults:
 
 ```text

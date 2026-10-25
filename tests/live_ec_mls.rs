@@ -7,6 +7,9 @@
 //! cargo test --test live_ec_mls -- --ignored --nocapture
 //! ```
 //!
+//! Over `https://`, the key exchange is `QRNG_LIVE_KEY_EXCHANGE` (`pq-only` or
+//! `pq-preferred`, default `pq-preferred`), and the test prints the group it negotiated.
+//!
 //! Hits Entropy Core routes `GET /capabilities`, `POST /entropy`, and
 //! `GET /healthtest` (no `/v1` or `/api` prefix).
 
@@ -22,7 +25,7 @@ use openmls::key_packages::KeyPackage;
 use openmls::prelude::Ciphersuite;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_qrand::{
-    ApiAuth, QrngClient, QrngConfig, QrngOpenMlsProvider, QrngRand, TransportMode,
+    ApiAuth, KeyExchange, QrngClient, QrngConfig, QrngOpenMlsProvider, QrngRand, TransportMode,
 };
 use openmls_rust_crypto::{MemoryStorage, RustCrypto};
 use openmls_traits::OpenMlsProvider;
@@ -51,7 +54,14 @@ fn live_config() -> QrngConfig {
         entropy_type: None,
         request_timeout: Duration::from_secs(15),
         health_poll_interval: Some(Duration::from_secs(5)),
-        key_exchange: openmls_qrand::KeyExchange::default(),
+        key_exchange: live_key_exchange(),
+    }
+}
+
+fn live_key_exchange() -> KeyExchange {
+    match env::var("QRNG_LIVE_KEY_EXCHANGE") {
+        Ok(name) => KeyExchange::parse(&name).expect("QRNG_LIVE_KEY_EXCHANGE"),
+        Err(_) => KeyExchange::PostQuantumPreferred,
     }
 }
 
@@ -87,6 +97,11 @@ fn credential_and_signer(
 fn live_connect_and_fetch_entropy() {
     let client = QrngClient::connect(live_config()).expect("connect to live QRNG Open API");
     let caps = client.capabilities();
+    println!(
+        "key exchange: {} (post quantum: {})",
+        client.key_exchange(),
+        client.key_exchange().is_post_quantum()
+    );
     println!(
         "capabilities: min_block_size={} max_block_size={} types={:?}",
         caps.entropy.min_block_size, caps.entropy.max_block_size, caps.entropy.entropy_types

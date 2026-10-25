@@ -7,7 +7,7 @@ use base64::Engine;
 use reqwest::StatusCode;
 use reqwest::Url;
 
-use crate::config::{ApiAuth, QrngConfig};
+use crate::config::{ApiAuth, NegotiatedKeyExchange, QrngConfig};
 use crate::error::QrngError;
 use crate::health::ProviderMetricsSnapshot;
 use crate::model::{Capabilities, EntropyRequest, EntropyResponse, HealthReport};
@@ -38,6 +38,7 @@ pub struct QrngClient {
     auth: ApiAuth,
     entropy_type: Option<String>,
     capabilities: Capabilities,
+    key_exchange: NegotiatedKeyExchange,
     metrics: Arc<ProviderMetrics>,
 }
 
@@ -65,8 +66,11 @@ impl QrngClient {
             }
         }
 
+        let key_exchange = config.negotiated_key_exchange();
+
         Ok(Self {
             http,
+            key_exchange,
             base_url: config.base_url,
             auth: config.auth,
             entropy_type: config.entropy_type,
@@ -77,6 +81,12 @@ impl QrngClient {
 
     pub fn capabilities(&self) -> &Capabilities {
         &self.capabilities
+    }
+
+    /// The TLS key exchange group of the link, found at [`QrngClient::connect`]. With
+    /// `KeyExchange::PostQuantumPreferred`, a classical group here is a downgrade.
+    pub fn key_exchange(&self) -> &NegotiatedKeyExchange {
+        &self.key_exchange
     }
 
     pub fn fetch_entropy(&self, len: usize) -> Result<Vec<u8>, QrngError> {
@@ -213,6 +223,7 @@ impl fmt::Debug for QrngClient {
             .field("base_url", &self.base_url)
             .field("auth", &self.auth)
             .field("entropy_type", &self.entropy_type)
+            .field("key_exchange", &self.key_exchange)
             .field("capabilities", &self.capabilities)
             .finish_non_exhaustive()
     }

@@ -104,6 +104,17 @@ The entropy that `Tls` and `MutualTls` fetch becomes key material. An attacker w
 
 Use `PostQuantumPreferred` only for an endpoint that cannot yet offer the hybrid group, and only as long as that lasts. `key_exchange` is ignored for `PlainHttp`. Certificates are not changed by this setting: the server and client certificates are verified with whatever algorithm they use.
 
+`QrngClient::key_exchange()` reports the group of the link, found at `connect`:
+
+| Result | Meaning |
+| --- | --- |
+| `NegotiatedKeyExchange::Group("X25519MLKEM768")` | Post quantum. With `PostQuantumOnly` this is known without a check, because it is the only group offered |
+| `NegotiatedKeyExchange::Group("X25519")` (or another classical group) | `PostQuantumPreferred` fell back: a downgrade |
+| `NegotiatedKeyExchange::Unknown(reason)` | `PostQuantumPreferred` only: the check handshake did not complete, for example because the endpoint is reachable only through a proxy |
+| `NegotiatedKeyExchange::PlainHttp` | No TLS |
+
+reqwest does not expose the group it negotiated. With `PostQuantumPreferred`, `connect` therefore makes one more TLS handshake to the base URL, directly over TCP, with the same rustls configuration, and closes it before any request. `is_post_quantum()` is true only for `X25519MLKEM768`.
+
 ### TLS
 
 ```rust

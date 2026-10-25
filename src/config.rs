@@ -1,5 +1,6 @@
 use std::fmt;
 use std::fs;
+use std::net::TcpStream;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,8 +8,8 @@ use std::time::Duration;
 use reqwest::redirect::Policy;
 use rustls::crypto::aws_lc_rs::{self, kx_group};
 use rustls::pki_types::pem::PemObject;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::{ClientConfig, RootCertStore};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+use rustls::{ClientConfig, ClientConnection, RootCertStore};
 
 use crate::error::QrngError;
 
@@ -47,6 +48,38 @@ impl KeyExchange {
         }
     }
 }
+
+/// The TLS key exchange group of a connected client ([`crate::QrngClient::key_exchange`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NegotiatedKeyExchange {
+    /// `PlainHttp`: no TLS, so no key exchange.
+    PlainHttp,
+    /// The group that the server chose, by its TLS name: `X25519MLKEM768` (post quantum),
+    /// or a classical group such as `X25519` or `secp256r1`.
+    Group(String),
+    /// `PostQuantumPreferred` only: the probe handshake did not complete, for this reason.
+    /// The group is not known, so it counts as not post quantum.
+    Unknown(String),
+}
+
+impl NegotiatedKeyExchange {
+    /// True only for `X25519MLKEM768`.
+    pub fn is_post_quantum(&self) -> bool {
+        matches!(self, NegotiatedKeyExchange::Group(group) if group == POST_QUANTUM_GROUP)
+    }
+}
+
+impl fmt::Display for NegotiatedKeyExchange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NegotiatedKeyExchange::PlainHttp => f.write_str("none (plain HTTP)"),
+            NegotiatedKeyExchange::Group(group) => f.write_str(group),
+            NegotiatedKeyExchange::Unknown(reason) => write!(f, "unknown ({reason})"),
+        }
+    }
+}
+
+const POST_QUANTUM_GROUP: &str = "X25519MLKEM768";
 
 #[derive(Debug)]
 pub enum TransportMode {
@@ -161,14 +194,79 @@ impl QrngConfig {
     }
 
     pub(crate) fn build_http_client(&self) -> Result<reqwest::blocking::Client, QrngError> {
-        let mut builder = reqwest::blocking::Client::builder()
-            .timeout(self.request_timeout)
-            .redirect(Policy::none());
-
         // reqwest builds a TLS client even for plain HTTP. Give it this crate's
         // configuration in every mode, so it never needs a process default provider; a
         // `PlainHttp` client trusts no root, so it cannot reach an https:// URL at all.
-        let tls = match &self.transport {
+        let builder = reqwest::blocking::Client::builder()
+            .timeout(self.request_timeout)
+            .redirect(Policy::none())
+            .use_preconfigured_tls(self.client_tls_config()?);
+        Ok(builder.build()?)
+    }
+
+    /// The key exchange group of this configuration's TLS link.
+    ///
+    /// `PostQuantumOnly` offers only `X25519MLKEM768`, so a link that connected uses it.
+    /// `PostQuantumPreferred` can fall back to a classical group, and reqwest does not
+    /// expose the group it negotiated, so this makes one more handshake with the same
+    /// rustls configuration and reads the group from it.
+    pub(crate) fn negotiated_key_exchange(&self) -> NegotiatedKeyExchange {
+        match (&self.transport, self.key_exchange) {
+            (TransportMode::PlainHttp, _) => NegotiatedKeyExchange::PlainHttp,
+            (_, KeyExchange::PostQuantumOnly) => {
+                NegotiatedKeyExchange::Group(POST_QUANTUM_GROUP.to_owned())
+            }
+            (_, KeyExchange::PostQuantumPreferred) => match self.probe_key_exchange() {
+                Ok(group) => NegotiatedKeyExchange::Group(group),
+                Err(reason) => NegotiatedKeyExchange::Unknown(reason),
+            },
+        }
+    }
+
+    /// One TLS handshake to the base URL, closed before any request.
+    fn probe_key_exchange(&self) -> Result<String, String> {
+        let config = self.client_tls_config().map_err(|err| err.to_string())?;
+        let host = self
+            .base_url
+            .host_str()
+            .ok_or_else(|| "base URL has no host".to_owned())?;
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        let server_name = match host.parse::<std::net::IpAddr>() {
+            Ok(ip) => ServerName::from(ip),
+            Err(_) => ServerName::try_from(host.to_owned())
+                .map_err(|err| format!("invalid server name: {err}"))?,
+        };
+        let address = self
+            .base_url
+            .socket_addrs(|| None)
+            .map_err(|err| format!("resolve: {err}"))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| "resolve: no address".to_owned())?;
+        let mut tcp = TcpStream::connect_timeout(&address, self.request_timeout)
+            .map_err(|err| format!("connect: {err}"))?;
+        tcp.set_read_timeout(Some(self.request_timeout))
+            .and_then(|()| tcp.set_write_timeout(Some(self.request_timeout)))
+            .map_err(|err| format!("connect: {err}"))?;
+        let mut connection = ClientConnection::new(Arc::new(config), server_name)
+            .map_err(|err| format!("TLS: {err}"))?;
+        while connection.is_handshaking() {
+            connection
+                .complete_io(&mut tcp)
+                .map_err(|err| format!("TLS handshake: {err}"))?;
+        }
+        let group = connection
+            .negotiated_key_exchange_group()
+            .map(|group| format!("{:?}", group.name()))
+            .ok_or_else(|| "TLS handshake: no key exchange group".to_owned())?;
+        connection.send_close_notify();
+        let _ = connection.complete_io(&mut tcp);
+        Ok(group)
+    }
+
+    /// The rustls client of every transport mode.
+    fn client_tls_config(&self) -> Result<ClientConfig, QrngError> {
+        Ok(match &self.transport {
             TransportMode::PlainHttp => self.tls_config(RootCertStore::empty(), None)?,
             TransportMode::Tls { ca_cert_pem } => {
                 let roots = match ca_cert_pem {
@@ -188,10 +286,7 @@ impl QrngConfig {
                 let identity = parse_client_identity(client_cert_pem, client_key_pem)?;
                 self.tls_config(roots, Some(identity))?
             }
-        };
-        builder = builder.use_preconfigured_tls(tls);
-
-        Ok(builder.build()?)
+        })
     }
 
     /// The rustls client of `Tls` and `MutualTls`: aws-lc-rs with the key exchange groups
