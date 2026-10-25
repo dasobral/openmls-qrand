@@ -45,8 +45,19 @@ struct HealthStub {
     body: Vec<u8>,
 }
 
+/// Key exchange groups a TLS test server offers.
+#[derive(Clone, Copy, Debug)]
+pub enum ServerGroups {
+    /// The aws-lc-rs default: `X25519MLKEM768` first, then X25519, P-256 and P-384.
+    Default,
+    /// Classical groups only: X25519 and P-256.
+    ClassicalOnly,
+}
+
 struct Shared {
     requests: Mutex<Vec<RecordedRequest>>,
+    /// The key exchange group negotiated on each TLS connection, in order.
+    groups: Mutex<Vec<String>>,
     capabilities: Mutex<Option<CapabilitiesStub>>,
     entropy_queue: Mutex<VecDeque<EntropyOverride>>,
     entropy_default_status: Mutex<u16>,
@@ -201,15 +212,30 @@ impl TestServer {
 
     /// HTTPS with a rustls server certificate. No client-certificate requirement.
     pub fn start_tls(server_id: &IssuedIdentity) -> Self {
-        Self::start_rustls("https", rustls_server_config(server_id, None))
+        Self::start_tls_with_groups(server_id, ServerGroups::Default)
+    }
+
+    /// HTTPS that offers only `groups` for key exchange.
+    pub fn start_tls_with_groups(server_id: &IssuedIdentity, groups: ServerGroups) -> Self {
+        Self::start_rustls("https", rustls_server_config(server_id, None, groups))
     }
 
     /// HTTPS that requires a client certificate issued by `client_ca`.
     pub fn start_mtls(server_id: &IssuedIdentity, client_ca: &TestCa) -> Self {
         Self::start_rustls(
             "https",
-            rustls_server_config(server_id, Some(client_ca.cert_der.as_slice())),
+            rustls_server_config(
+                server_id,
+                Some(client_ca.cert_der.as_slice()),
+                ServerGroups::Default,
+            ),
         )
+    }
+
+    /// The key exchange group negotiated on each TLS connection so far, by name
+    /// (for example `X25519MLKEM768`).
+    pub fn negotiated_groups(&self) -> Vec<String> {
+        self.shared.groups.lock().expect("groups lock").clone()
     }
 
     fn start_rustls(scheme: &'static str, tls_config: ServerConfig) -> Self {
@@ -358,6 +384,7 @@ impl Drop for TestServer {
 fn new_shared() -> Arc<Shared> {
     Arc::new(Shared {
         requests: Mutex::new(Vec::new()),
+        groups: Mutex::new(Vec::new()),
         capabilities: Mutex::new(None),
         entropy_queue: Mutex::new(VecDeque::new()),
         entropy_default_status: Mutex::new(200),
@@ -365,7 +392,19 @@ fn new_shared() -> Arc<Shared> {
     })
 }
 
-fn rustls_server_config(server_id: &IssuedIdentity, client_ca_der: Option<&[u8]>) -> ServerConfig {
+fn rustls_server_config(
+    server_id: &IssuedIdentity,
+    client_ca_der: Option<&[u8]>,
+    groups: ServerGroups,
+) -> ServerConfig {
+    let mut provider = rustls::crypto::aws_lc_rs::default_provider();
+    if let ServerGroups::ClassicalOnly = groups {
+        provider.kx_groups = vec![
+            rustls::crypto::aws_lc_rs::kx_group::X25519,
+            rustls::crypto::aws_lc_rs::kx_group::SECP256R1,
+        ];
+    }
+    let provider = Arc::new(provider);
     let cert_chain = vec![
         CertificateDer::from(server_id.cert_der.clone()),
         CertificateDer::from(server_id.ca_der.clone()),
@@ -377,15 +416,20 @@ fn rustls_server_config(server_id: &IssuedIdentity, client_ca_der: Option<&[u8]>
         roots
             .add(CertificateDer::from(ca_der.to_vec()))
             .expect("client CA as rustls root");
-        let verifier = WebPkiClientVerifier::builder(roots.into())
-            .build()
-            .expect("mTLS client cert verifier");
-        ServerConfig::builder()
+        let verifier =
+            WebPkiClientVerifier::builder_with_provider(roots.into(), Arc::clone(&provider))
+                .build()
+                .expect("mTLS client cert verifier");
+        ServerConfig::builder_with_provider(Arc::clone(&provider))
+            .with_safe_default_protocol_versions()
+            .expect("TLS versions")
             .with_client_cert_verifier(verifier)
             .with_single_cert(cert_chain, key)
             .expect("mTLS server cert")
     } else {
-        ServerConfig::builder()
+        ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("TLS versions")
             .with_no_client_auth()
             .with_single_cert(cert_chain, key)
             .expect("TLS server cert")
@@ -472,6 +516,13 @@ fn handle_tls_conn(tcp: TcpStream, tls_config: Arc<ServerConfig>, shared: Arc<Sh
     let Some((method, path, headers, body)) = read_http11(&mut stream) else {
         return;
     };
+    if let Some(group) = stream.conn.negotiated_key_exchange_group() {
+        shared
+            .groups
+            .lock()
+            .expect("groups lock")
+            .push(format!("{:?}", group.name()));
+    }
 
     shared
         .requests

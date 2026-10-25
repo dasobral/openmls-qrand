@@ -53,6 +53,7 @@ fn config(base_url: &str, transport: TransportMode) -> QrngConfig {
         entropy_type: None,
         request_timeout: Duration::from_secs(5),
         health_poll_interval: Some(Duration::from_secs(5)),
+        key_exchange: openmls_qrand::KeyExchange::default(),
     }
 }
 

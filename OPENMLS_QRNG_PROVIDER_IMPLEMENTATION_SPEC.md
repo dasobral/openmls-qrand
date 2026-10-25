@@ -380,8 +380,12 @@ pub struct QrngConfig {
     pub entropy_type: Option<String>,
     pub request_timeout: Duration,
     pub health_poll_interval: Option<Duration>,
+    /// Amendment of 2026-10-25: the TLS key exchange (default `PostQuantumOnly`).
+    pub key_exchange: KeyExchange,
 }
 ```
+
+**Amendment (2026-10-25): post quantum TLS key exchange.** `Tls` and `MutualTls` use rustls with the aws-lc-rs provider, configured by this crate and handed to reqwest. `KeyExchange::PostQuantumOnly` (the default) offers only the hybrid group `X25519MLKEM768` over TLS 1.3, and refuses a server without it. `KeyExchange::PostQuantumPreferred` offers it first and accepts X25519, P-256 or P-384 from a server that has no post quantum group. Reason: the fetched entropy becomes key material, and a recorded classical key exchange could be broken later. Tests: `tests/pq_tls.rs`.
 
 Defaults:
 
@@ -1819,6 +1823,7 @@ let config = QrngConfig {
     entropy_type: None,
     request_timeout: Duration::from_secs(5),
     health_poll_interval: Some(Duration::from_secs(5)),
+    key_exchange: KeyExchange::default(),
 };
 ```
 
@@ -1834,6 +1839,7 @@ let config = QrngConfig {
     entropy_type: None,
     request_timeout: Duration::from_secs(5),
     health_poll_interval: Some(Duration::from_secs(5)),
+    key_exchange: KeyExchange::default(),
 };
 ```
 
@@ -1851,6 +1857,7 @@ let config = QrngConfig {
     entropy_type: None,
     request_timeout: Duration::from_secs(5),
     health_poll_interval: Some(Duration::from_secs(5)),
+    key_exchange: KeyExchange::default(),
 };
 ```
 

@@ -52,8 +52,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openmls_qrand::{
-    ApiAuth, HealthMonitor, QrngClient, QrngConfig, QrngOpenMlsProvider, QrngRand,
-    TransportMode,
+    ApiAuth, HealthMonitor, KeyExchange, QrngClient, QrngConfig, QrngOpenMlsProvider,
+    QrngRand, TransportMode,
 };
 use openmls_rust_crypto::{MemoryStorage, RustCrypto};
 
@@ -64,6 +64,7 @@ let config = QrngConfig {
     entropy_type: None,
     request_timeout: Duration::from_secs(5),
     health_poll_interval: Some(Duration::from_secs(5)),
+    key_exchange: KeyExchange::PostQuantumOnly,
 };
 
 let client = Arc::new(QrngClient::connect(config)?);
@@ -92,12 +93,23 @@ Transport is selected explicitly. The library does not infer the security mode f
 
 There is no insecure-TLS option. `Tls { ca_cert_pem: None }` uses the rustls webpki-roots bundle (Mozilla CA set). The OS trust store is not consulted. `Tls { ca_cert_pem: Some(path) }` adds that CA PEM to the client trust store. `MutualTls` always loads a CA, client certificate, and client key.
 
+### Post quantum key exchange
+
+The entropy that `Tls` and `MutualTls` fetch becomes key material. An attacker who records a connection now and breaks its key exchange later would learn it. Every TLS connection therefore uses the hybrid key exchange group `X25519MLKEM768` (ML-KEM-768 combined with X25519), through rustls with the aws-lc-rs provider.
+
+| `key_exchange` | Groups offered | TLS versions | A server without `X25519MLKEM768` |
+| --- | --- | --- | --- |
+| `KeyExchange::PostQuantumOnly` (default) | `X25519MLKEM768` only | 1.3 | Refused: no connection, no entropy |
+| `KeyExchange::PostQuantumPreferred` | `X25519MLKEM768`, then X25519, P-256, P-384 | 1.2, 1.3 | Accepted with a classical group: a downgrade is possible |
+
+Use `PostQuantumPreferred` only for an endpoint that cannot yet offer the hybrid group, and only as long as that lasts. `key_exchange` is ignored for `PlainHttp`. Certificates are not changed by this setting: the server and client certificates are verified with whatever algorithm they use.
+
 ### TLS
 
 ```rust
 use std::time::Duration;
 
-use openmls_qrand::{ApiAuth, QrngConfig, TransportMode};
+use openmls_qrand::{ApiAuth, KeyExchange, QrngConfig, TransportMode};
 
 let config = QrngConfig {
     base_url: "https://entropy.example.net".parse()?,
@@ -108,6 +120,7 @@ let config = QrngConfig {
     entropy_type: None,
     request_timeout: Duration::from_secs(5),
     health_poll_interval: Some(Duration::from_secs(5)),
+    key_exchange: KeyExchange::PostQuantumOnly,
 };
 ```
 
@@ -122,7 +135,7 @@ transport: TransportMode::Tls { ca_cert_pem: None },
 ```rust
 use std::time::Duration;
 
-use openmls_qrand::{ApiAuth, QrngConfig, TransportMode};
+use openmls_qrand::{ApiAuth, KeyExchange, QrngConfig, TransportMode};
 
 let config = QrngConfig {
     base_url: "https://entropy.example.net".parse()?,
@@ -135,6 +148,7 @@ let config = QrngConfig {
     entropy_type: None,
     request_timeout: Duration::from_secs(5),
     health_poll_interval: Some(Duration::from_secs(5)),
+    key_exchange: KeyExchange::PostQuantumOnly,
 };
 ```
 

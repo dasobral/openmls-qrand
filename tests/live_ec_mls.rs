@@ -51,6 +51,7 @@ fn live_config() -> QrngConfig {
         entropy_type: None,
         request_timeout: Duration::from_secs(15),
         health_poll_interval: Some(Duration::from_secs(5)),
+        key_exchange: openmls_qrand::KeyExchange::default(),
     }
 }
 

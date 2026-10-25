@@ -20,7 +20,7 @@ mod rng;
 
 pub use backend::EntropyBackend;
 pub use client::QrngClient;
-pub use config::{ApiAuth, QrngConfig, TransportMode};
+pub use config::{ApiAuth, KeyExchange, QrngConfig, TransportMode};
 pub use error::QrngError;
 pub use health::{HealthMonitor, HealthSnapshot, ProviderMetricsSnapshot};
 #[cfg(feature = "mock")]
